@@ -1,0 +1,677 @@
+import copy
+import json
+import logging
+import os
+from collections import Sized
+from pathlib import Path
+from typing import Dict, Optional, Any, List
+
+import _jsonnet
+import numpy as np
+import torch
+import transformers
+import wandb
+from overrides import overrides
+from torch import nn
+from transformers import (
+    set_seed,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    WEIGHTS_NAME,
+    ProgressCallback,
+    TrainerCallback,
+)
+from transformers.integrations import WandbCallback
+from transformers.trainer_pt_utils import metrics_format
+from transformers.trainer_utils import get_last_checkpoint
+from wandb.sdk.wandb_run import Run
+
+import common.nest
+from common.from_params import create_kwargs
+from common.nest import unflatten
+from hp_search_space import HPSearchSpace
+from modules.trainer_with_metrics import Seq2SeqTrainerWithMetrics
+from runtime.base_runtime import Runtime
+from tokenization_utils import Tokenizer
+
+transformers.logging.set_verbosity_info()
+
+from common import (
+    Lazy,
+    gpu_utils,
+    ExperimentStage,
+    Params,
+    JsonDict,
+)
+from common.py_utils import get_human_readable_count, chunks
+from data import DataLoaderFactory
+from models import Model
+
+logger = logging.getLogger("app")
+
+
+def get_args_dict(**kwargs) -> Dict[str, Any]:
+    return kwargs
+
+
+class CustomWandbCallback(WandbCallback):
+    @overrides
+    def setup(self, args, state, model, **kwargs):
+        if self._wandb is None:
+            return
+        self._initialized = True
+        if state.is_world_process_zero:
+            # define default x-axis (for latest wandb versions)
+            if getattr(self._wandb, "define_metric", None):
+                self._wandb.define_metric("train/global_step")
+                self._wandb.define_metric(
+                    "*", step_metric="train/global_step", step_sync=True
+                )
+
+            # keep track of model topology and gradients, unsupported on TPU
+            from transformers import is_torch_tpu_available
+
+            if not is_torch_tpu_available() and os.getenv("WANDB_WATCH") != "false":
+                self._wandb.watch(
+                    model,
+                    log=os.getenv("WANDB_WATCH", "gradients"),
+                    log_freq=max(100, args.logging_steps),
+                    log_graph=True,
+                )
+
+    def on_log(self, args, state, control, model=None, logs=None, **kwargs):
+        if self._wandb is None:
+            return
+        if not self._initialized:
+            self.setup(args, state, model)
+        if state.is_world_process_zero:
+            logs = self.rewrite_logs(logs)
+            self._wandb.log({**logs, "train/global_step": state.global_step})
+
+    @staticmethod
+    def rewrite_logs(d):
+        new_d = {}
+        eval_prefix = "eval_"
+        eval_prefix_len = len(eval_prefix)
+        test_prefix = "test_"
+        test_prefix_len = len(test_prefix)
+        pred_prefix = "pred_"
+        pred_prefix_len = len(pred_prefix)
+        for k, v in d.items():
+            if k.startswith(eval_prefix):
+                new_d["eval/" + k[eval_prefix_len:]] = v
+            elif k.startswith(test_prefix):
+                new_d["test/" + k[test_prefix_len:]] = v
+            elif k.startswith(pred_prefix):
+                new_d["pred/" + k[pred_prefix_len:]] = v
+            else:
+                new_d["train/" + k] = v
+        return new_d
+
+
+class CustomProgressCallback(ProgressCallback):
+    @overrides
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if state.is_local_process_zero and self.training_bar is not None:
+            _ = logs.pop("total_flos", None)
+            if len(state.log_history) >= 2:
+                last_log = state.log_history[-2]
+            else:
+                last_log = {}
+
+            last_log.update(logs)
+            self.training_bar.set_postfix(**last_log)
+
+
+class ClLoggerForWandb(TrainerCallback):
+    def __init__(self, wandb_logger, log_dir: Path, num_examples_to_log: int = 0):
+        self._has_logged = False
+        self._num_examples_to_log = num_examples_to_log
+        self._log_dir = log_dir / "cl_sampler"
+        self._logger = wandb_logger
+
+    def _log_to_wandb(self):
+        log_obj_dir = self._log_dir / "log_objs"
+        log_obj_paths = list(log_obj_dir.iterdir())
+        with log_obj_paths[0].open("rb") as f:
+            import dill
+
+            obj = dill.load(f)
+        columns = sorted(common.nest.flatten(obj).keys())
+        table = wandb.Table(columns=columns)
+
+        for log_path in log_obj_paths:
+            with log_path.open("rb") as f:
+                import dill
+
+                obj = dill.load(f)
+                obj = common.nest.flatten(obj)
+                for k in obj.keys():
+                    if "_img" in k and obj[k] is not None:
+                        obj[k] = wandb.Image(obj[k])
+
+                flat_obj = sorted(obj.items(), key=lambda x: x[0])
+                flat_obj = [v for _, v in flat_obj]
+
+                table.add_data(*flat_obj)
+
+        self._logger.log({"cl_samples": table})
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.is_world_process_zero and not self._has_logged:
+            log_obj_dir = self._log_dir / "log_objs"
+            if log_obj_dir.exists():
+                log_obj_paths = list(log_obj_dir.iterdir())
+                if len(log_obj_paths) < self._num_examples_to_log:
+                    return
+
+                self._log_to_wandb()
+                self._has_logged = True
+
+
+from transformers import trainer
+
+trainer.DEFAULT_PROGRESS_CALLBACK = CustomProgressCallback
+
+
+@Runtime.register("seq2seq")
+class Seq2SeqRuntime(Runtime):
+    def __init__(
+        self,
+        exp_name: str,
+        project_name: str,
+        # model: Lazy[Model],
+        model: JsonDict,
+        dataset: Lazy[DataLoaderFactory],
+        tokenizer: Lazy[Tokenizer],
+        trainer: Optional[Dict[str, Any]] = None,
+        directory: Optional[str] = "experiments",
+        global_vars: Optional[Dict[str, Any]] = None,
+        hp_search_space: Optional[Lazy[HPSearchSpace]] = None,
+        config_dict: Optional[Dict[str, Any]] = None,
+        sweep_run: Optional[bool] = False,
+        config_filenames: Optional[List[str]] = None,
+    ):
+        self.lazy_model = model
+        assert "type" in model
+        self.lazy_dataset = dataset
+        self.exp_name = exp_name
+        self.project_name = project_name
+        self.sweep_run = sweep_run
+
+        exp_root = Path(directory) / self.exp_name
+        exp_root.mkdir(parents=True, exist_ok=True)
+        self.exp_root = exp_root
+
+        cache_dir = Path(os.getcwd()) / "experiments" / "hf_cache_dir"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir = cache_dir
+
+        logs_dir = self.exp_root / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir = logs_dir
+
+        self.global_vars = global_vars or {"seed": 123}
+        self.debug_mode = self.global_vars.get("debug_mode", False)
+        self.force_offline = self.global_vars.get("force_offline", False)
+        self.config_dict = config_dict
+
+        self.training_args = trainer or {}
+
+        seed = self.global_vars["seed"]
+        logger.info(f"Setting seed = {seed}")
+        set_seed(seed)
+
+        assert self.logger is not None
+
+        self.dl_factory = self.lazy_dataset.construct(
+            cache_dir=self.cache_dir, log_dir=self.logs_dir
+        )
+        self.write_meta_data()
+
+        self.tokenizer = tokenizer.construct(
+            dataset=self.dl_factory,
+            experiment_root=self.exp_root,
+            cache_dir=self.cache_dir,
+        )
+        self.dl_factory.set_tokenizer(self.tokenizer)
+
+        self.hp_search_space = hp_search_space or Lazy(HPSearchSpace)
+
+    def write_meta_data(self):
+        gpu_info = gpu_utils.get_cuda_info()
+        if len(gpu_info) != 0:
+            for i, gi in enumerate(gpu_info):
+                self.logger.summary[f"gpus_info_{i}"] = gi
+
+            logger.info(f"GPUs Info: \n{json.dumps(gpu_info, indent=4)}")
+
+        metadata = {"exp_name": self.exp_name, "gpus_info": gpu_info}
+        with open(self.exp_root / "metadata.json", "w") as f:
+            f.write(json.dumps(metadata, indent=4, sort_keys=True))
+
+        conf_path = self.exp_root / "config.json"
+        if conf_path.exists():
+            self.logger.save(str(conf_path), policy="now")
+
+    @property
+    def logger(self) -> Run:
+        if not hasattr(self, "_logger"):
+            if wandb.run is None:
+                if self.debug_mode:
+                    mode = "disabled"
+                elif self.force_offline:
+                    mode = "offline"
+                else:
+                    mode = "online"
+
+                wandb.init(
+                    dir=str(self.logs_dir),
+                    config=self.config_dict,
+                    project=self.project_name,
+                    name=self.exp_name,
+                    resume="allow",
+                    mode=mode,
+                    force=True,
+                )
+
+            self._logger = wandb.run
+
+        return self._logger
+
+    def get_last_checkpoint_path(self) -> Optional[Path]:
+        checkpoint_dir = self.exp_root / "checkpoints"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        last_checkpoint = get_last_checkpoint(checkpoint_dir)
+        if last_checkpoint is not None:
+            last_checkpoint = Path(last_checkpoint)
+
+        return last_checkpoint
+
+    def create_model(self) -> Model:
+        lazy_model = copy.deepcopy(self.lazy_model)
+        model_type = lazy_model.pop("type", Model.default_implementation)
+        if model_type is None:
+            raise ValueError("Cannot recognize model")
+        model_constructor = Model.by_name(model_type)
+        model_class = Model.resolve_class_name(model_type)[0]
+
+        from_pretrained = lazy_model.pop("from_pretrained", False)
+
+        model_kwargs = create_kwargs(
+            model_constructor,
+            model_class,
+            params=Params(lazy_model),
+            tokenizer=self.tokenizer,
+            cache_dir=self.cache_dir,
+        )
+
+        if from_pretrained:
+            hf_model_name = lazy_model["hf_model_name"]
+            model = model_class.from_pretrained(hf_model_name, **model_kwargs)
+        else:
+            model = model_constructor(**model_kwargs)
+
+        return model
+
+    def create_trainer(self, stage: ExperimentStage, **kwargs) -> Seq2SeqTrainer:
+        model = kwargs.get("model", self.create_model())
+
+        training_args = self.training_args
+        training_args["output_dir"] = str(self.exp_root / "checkpoints")
+        training_args["report_to"] = "none"
+
+        if kwargs.get("eval_dataset", None) is None:
+            training_args["evaluation_strategy"] = "no"
+
+        training_args = Seq2SeqTrainingArguments(**training_args)
+
+        data_collator = self.dl_factory.get_collate_fn(stage)
+        try:
+            data_collator.model = model
+        except Exception as exp:
+            logger.warning(exp)
+
+        cl_logger_callbacks = []
+        ds_conf_dict = self.lazy_dataset._params.as_flat_dict()
+        found_keys = [k for k in ds_conf_dict.keys() if "num_cl_examples_to_log" in k]
+        if len(found_keys) == 1:
+            num_cl_examples_to_log = ds_conf_dict[found_keys[0]]
+            cl_logger_callbacks.append(
+                ClLoggerForWandb(
+                    self.logger,
+                    self.logs_dir,
+                    num_cl_examples_to_log * training_args.dataloader_num_workers,
+                )
+            )
+
+        trainer = Seq2SeqTrainerWithMetrics(
+            model=model,
+            args=training_args,
+            tokenizer=getattr(self.dl_factory, "tokenizer", None),
+            data_collator=self.dl_factory.get_collate_fn(stage),
+            compute_metrics=self.dl_factory.get_compute_metric_fn(stage),
+            callbacks=[CustomWandbCallback()] + cl_logger_callbacks,
+            **kwargs,
+        )
+
+        return trainer
+
+    def log_number_of_parameters(self, model: nn.Module):
+        try:
+            total_parameters = sum(p.numel() for p in model.parameters())
+            trainable_parameters = sum(
+                p.numel() for p in model.parameters() if p.requires_grad
+            )
+
+            logger.info(
+                "######## Number of Parameters ########\n"
+                f"{get_human_readable_count(trainable_parameters)} Trainable params \n"
+                f"{get_human_readable_count(total_parameters - trainable_parameters)} Non-trainable params \n"
+                f"{get_human_readable_count(total_parameters)} Total params \n"
+                "######################################\n"
+            )
+
+            self.logger.summary.update(
+                {
+                    "num_trainable_params": trainable_parameters,
+                    "num_non_trainable_params": total_parameters - trainable_parameters,
+                    "num_total_params": total_parameters,
+                },
+            )
+
+        except Exception as exp:
+            logger.warning("Couldn't log the number of parameters because of ")
+            logger.warning(str(exp))
+
+    def log_metrics_to_console(
+        self, split: str = "None", metrics: Dict[str, Any] = None
+    ):
+        if metrics is None:
+            return
+
+        log_str = f"***** {split} metrics *****\n"
+        metrics_formatted = metrics_format(None, metrics)
+        k_width = max(len(str(x)) for x in metrics_formatted.keys())
+        v_width = max(len(str(x)) for x in metrics_formatted.values())
+        for key in sorted(metrics_formatted.keys()):
+            log_str += f"  {key: <{k_width}} = {metrics_formatted[key]:>{v_width}}\n"
+
+        logger.info(log_str)
+
+    def _load_last_checkpoint(self, trainer: Seq2SeqTrainer):
+        last_checkpoint = self.get_last_checkpoint_path()
+        if last_checkpoint is not None:
+            logger.info(f"Loading checkpoints from {last_checkpoint}")
+            state_dict = torch.load(last_checkpoint / WEIGHTS_NAME, map_location="cpu")
+            trainer._load_state_dict_in_model(state_dict)
+        else:
+            logger.info(f"Initializing model from scratch")
+
+    def train(self, eval_split: str = "valid"):
+        logger.info(f"*** Training ***")
+        torch.cuda.empty_cache()
+
+        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING)
+        eval_stage = ExperimentStage.from_split(eval_split)
+        eval_dataset = self.dl_factory.get_dataset(stage=eval_stage)
+        if eval_dataset is None:
+            logger.info(
+                "No evaluation dataset found. Disabled evaluation during training."
+            )
+
+        trainer = self.create_trainer(
+            ExperimentStage.TRAINING,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+        )
+        self.log_number_of_parameters(trainer.model)
+
+        last_checkpoint = self.get_last_checkpoint_path()
+        if last_checkpoint is not None:
+            logger.info(f"Loading checkpoints from {last_checkpoint}")
+
+        train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
+        trainer.save_model()
+
+        metrics = train_result.metrics
+        if isinstance(train_dataset, Sized):
+            metrics["num_train_samples"] = len(trainer.train_dataset)
+            self.logger.summary.update(
+                {
+                    "num_train_samples": len(trainer.train_dataset),
+                }
+            )
+
+        self.log_metrics_to_console("train", metrics)
+        trainer.save_metrics("train", metrics)
+        trainer.save_state()
+
+    def _load_best_checkpoint(self, trainer):
+        ckpt_dir = self.exp_root / "checkpoints"
+        last_checkpoint = self.get_last_checkpoint_path()
+        if (ckpt_dir / "trainer_state.json").exists():
+            trainer_state = json.load((ckpt_dir / "trainer_state.json").open())
+            best_model_checkpoint = trainer_state.get("best_model_checkpoint", None)
+        elif (
+            last_checkpoint is not None
+            and (last_checkpoint / "trainer_state.json").exists()
+        ):
+            trainer_state = json.load((last_checkpoint / "trainer_state.json").open())
+            best_model_checkpoint = trainer_state.get("best_model_checkpoint", None)
+        else:
+            best_model_checkpoint = None
+
+        if best_model_checkpoint is None:
+            logger.warning("Could not find the best checkpoint")
+            raise ValueError("Best checkpoint not found")
+
+        logger.info(f"Loading checkpoints from {best_model_checkpoint}")
+        state_dict = torch.load(
+            Path(best_model_checkpoint) / WEIGHTS_NAME, map_location="cpu"
+        )
+        trainer._load_state_dict_in_model(state_dict)
+
+    def evaluate(self, split: str = "test", load_best: bool = True):
+        logger.info(f"*** Evaluate on {split} ***")
+        torch.cuda.empty_cache()
+
+        stage = ExperimentStage.from_split(split)
+
+        trainer = self.create_trainer(stage)
+        if load_best:
+            try:
+                self._load_best_checkpoint(trainer)
+            except:
+                logger.info("Loading last checkpoint...")
+                self._load_last_checkpoint(trainer)
+        else:
+            logger.info("Loading last checkpoint...")
+            self._load_last_checkpoint(trainer)
+
+        dataset = self.dl_factory.get_dataset(stage=stage)
+
+        if dataset is None:
+            logger.error(f"No dataset found for split = {split}")
+            return
+
+        metrics = trainer.evaluate(
+            eval_dataset=dataset, metric_key_prefix=f"eval_{split}"
+        )
+        if isinstance(dataset, Sized):
+            metrics[f"eval_{split}_num_samples"] = len(dataset)
+            self.logger.summary.update({f"eval_{split}_num_samples": len(dataset)})
+
+        self.log_metrics_to_console(f"eval_{split}", metrics)
+        trainer.save_metrics(f"eval_{split}", metrics)
+
+    def train_and_evaluate(
+        self,
+        eval_split: str = "valid",
+        test_split: str = "test",
+        load_best: bool = True,
+    ):
+        self.train(eval_split)
+        self.evaluate(test_split, load_best=load_best)
+
+    def predict(
+        self, split: str = "test", enable_metrics: bool = False, load_best: bool = True
+    ):
+        logger.info(f"*** Predict on {split} ***")
+        torch.cuda.empty_cache()
+        if "load_best_model_at_end" in self.training_args:
+            self.training_args.pop("load_best_model_at_end")
+
+        trainer = self.create_trainer(ExperimentStage.PREDICTION)
+        if load_best:
+            try:
+                self._load_best_checkpoint(trainer)
+            except:
+                logger.info("Loading last checkpoint...")
+                self._load_last_checkpoint(trainer)
+        else:
+            logger.info("Loading last checkpoint...")
+            self._load_last_checkpoint(trainer)
+
+        stage = ExperimentStage.from_split(split)
+        dataset = self.dl_factory.get_dataset(stage=stage)
+        if dataset is None:
+            logger.error(f"No dataset found for split = {split}")
+            return
+
+        test_results = trainer.predict(dataset, metric_key_prefix=f"pred_{split}")
+
+        metrics = test_results.metrics
+        metrics[f"pred_{split}_num_samples"] = len(dataset)
+        self.log_metrics_to_console(f"pred_{split}", metrics)
+        trainer.save_metrics(f"pred_{split}", metrics)
+        trainer.log(metrics)
+
+        if trainer.is_world_process_zero():
+            preds = test_results.predictions
+            if isinstance(test_results.predictions, tuple):
+                preds = preds[0]
+
+            if len(preds.shape) == 3:
+                preds = np.argmax(preds, axis=-1)
+
+            output_test_preds_file = self.exp_root / f"pred_out_{split}.txt"
+            with output_test_preds_file.open("w") as writer:
+                for batch_preds in chunks(preds, 128):
+                    pred_texts = self.tokenizer.batch_decode(
+                        batch_preds,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False,
+                    )
+                    pred_texts = [pred.strip() for pred in pred_texts]
+                    for pt in pred_texts:
+                        writer.write(f"{pt}\n")
+
+            self.logger.save(str(output_test_preds_file), policy="now")
+
+    def combine_pred(self, split: str = "test"):
+        logger.info(f"*** Combing predictions on split: {split} ***")
+
+        prediction_path = self.exp_root / f"pred_out_{split}.txt"
+        logger.info(f"Prediction path: {prediction_path}")
+        assert prediction_path.exists()
+
+        stage = ExperimentStage.from_split(split)
+
+        with open(self.dl_factory.get_ds_file_path(stage)) as inf:
+            lines_in = inf.readlines()
+        with prediction_path.open() as inf:
+            lines_out = inf.readlines()
+
+        pred_table = wandb.Table(columns=["id", "input", "gold", "prediction"])
+        combined_file = self.exp_root / f"pred_combined_{split}.txt"
+        with combined_file.open("w") as outf:
+            for i, (l_in, l_out) in enumerate(zip(lines_in, lines_out)):
+                outf.write(str(i) + "\n")
+                for p in l_in.split("\t"):
+                    outf.write(p.strip() + "\n")
+                outf.write(l_out.strip() + "\n")
+                outf.write("\n")
+
+                x, y = l_in.split("\t")
+                pred_table.add_data(i, x.strip(), y.strip(), l_out.strip())
+
+        self.logger.log({"prediction_table": pred_table})
+        self.logger.save(str(combined_file), policy="now")
+
+        logger.info(f"Done combing!")
+
+    def hp_step(
+        self,
+        eval_split: str = "valid",
+        load_best: bool = True,
+    ):
+        self.train(eval_split)
+        self.predict(eval_split, load_best=load_best, enable_metrics=True)
+        self.combine_pred(eval_split)
+
+    def hp_tune(self, eval_split: str = "valid"):
+        logger.info(f"*** Hyperparameter Tuning (on split: {eval_split}) ***")
+        torch.cuda.empty_cache()
+
+        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING)
+        eval_stage = ExperimentStage.from_split(eval_split)
+        eval_dataset = self.dl_factory.get_dataset(stage=eval_stage)
+        if eval_dataset is None:
+            raise ValueError(
+                "No evaluation dataset found. Disabled evaluation during training."
+            )
+
+        base_model_config = self.config_dict.get("model", {})
+        tokenizer = self.tokenizer
+        cache_dir = self.cache_dir
+
+        def model_init(config: Dict[str, Any]) -> Model:
+            config = config or {}
+            config = unflatten(config, "/")
+            model_config = config.get("MHSP", {})
+
+            base_cfg_str = json.dumps(base_model_config)
+            diff_cfg_str = json.dumps(model_config)
+
+            jsonnet_str = f"""
+            local base = {base_cfg_str};
+            local diff = {diff_cfg_str}; 
+            std.mergePatch(base, diff)
+            """
+            new_config_json = _jsonnet.evaluate_snippet("snippet", jsonnet_str)
+            new_config = json.loads(new_config_json)
+            new_config = Params(new_config)
+
+            model = Lazy(Model, params=new_config).construct(
+                tokenizer=tokenizer,
+                cache_dir=cache_dir,
+            )
+
+            return model
+
+        trainer = self.create_trainer(
+            ExperimentStage.TRAINING,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            model=None,
+            model_init=model_init,
+        )
+
+        search_space = self.hp_search_space.construct()
+
+        resources_per_trial = {
+            int(os.environ.get("APP_HPT_RES_PER_TRIAL_CPU", "1")),
+            int(os.environ.get("APP_HPT_RES_PER_TRIAL_GPU", "1")),
+        }
+        trainer.hyperparameter_search(
+            backend="ray",
+            hp_space=search_space.get_search_space_fn(),
+            compute_objective=search_space.get_compute_obj_fn(),
+            direction=search_space.direction,
+            resources_per_trial=resources_per_trial,
+            keep_checkpoints_num=1,
+        )
+
+
+Runtime.default_implementation = "seq2seq"
