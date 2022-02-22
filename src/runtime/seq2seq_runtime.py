@@ -132,7 +132,7 @@ class ClLoggerForWandb(TrainerCallback):
 
     def _log_to_wandb(self):
         log_obj_dir = self._log_dir / "log_objs"
-        log_obj_paths = list(log_obj_dir.iterdir())
+        log_obj_paths = sorted(list(log_obj_dir.iterdir()))
         with log_obj_paths[0].open("rb") as f:
             import dill
 
@@ -252,7 +252,14 @@ class Seq2SeqRuntime(Runtime):
 
         conf_path = self.exp_root / "config.json"
         if conf_path.exists():
-            self.logger.save(str(conf_path), policy="now")
+            self.logger.save(str(conf_path.absolute()), policy="now")
+
+        dotenv_path = self.exp_root / "app.env"
+        with dotenv_path.open("w") as f:
+            for k, v in os.environ.items():
+                if k.startswith("APP_"):
+                    f.write(f"{k}={v}\n")
+        self.logger.save(str(dotenv_path.absolute()), policy="now")
 
     @property
     def logger(self) -> Run:
@@ -315,7 +322,10 @@ class Seq2SeqRuntime(Runtime):
         return model
 
     def create_trainer(self, stage: ExperimentStage, **kwargs) -> Seq2SeqTrainer:
-        model = kwargs.get("model", self.create_model())
+        if "model" not in kwargs:
+            kwargs["model"] = self.create_model()
+
+        model = kwargs.get("model")
 
         training_args = self.training_args
         training_args["output_dir"] = str(self.exp_root / "checkpoints")
@@ -346,7 +356,6 @@ class Seq2SeqRuntime(Runtime):
             )
 
         trainer = Seq2SeqTrainerWithMetrics(
-            model=model,
             args=training_args,
             tokenizer=getattr(self.dl_factory, "tokenizer", None),
             data_collator=self.dl_factory.get_collate_fn(stage),
@@ -412,16 +421,19 @@ class Seq2SeqRuntime(Runtime):
         logger.info(f"*** Training ***")
         torch.cuda.empty_cache()
 
-        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING)
+        model = self.create_model()
+
         eval_stage = ExperimentStage.from_split(eval_split)
         eval_dataset = self.dl_factory.get_dataset(stage=eval_stage)
         if eval_dataset is None:
             logger.info(
                 "No evaluation dataset found. Disabled evaluation during training."
             )
+        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING)
 
         trainer = self.create_trainer(
             ExperimentStage.TRAINING,
+            model=model,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
         )
@@ -567,7 +579,7 @@ class Seq2SeqRuntime(Runtime):
                     for pt in pred_texts:
                         writer.write(f"{pt}\n")
 
-            self.logger.save(str(output_test_preds_file), policy="now")
+            self.logger.save(str(output_test_preds_file.absolute()), policy="now")
 
     def combine_pred(self, split: str = "test"):
         logger.info(f"*** Combing predictions on split: {split} ***")
@@ -597,7 +609,7 @@ class Seq2SeqRuntime(Runtime):
                 pred_table.add_data(i, x.strip(), y.strip(), l_out.strip())
 
         self.logger.log({"prediction_table": pred_table})
-        self.logger.save(str(combined_file), policy="now")
+        self.logger.save(str(combined_file.absolute()), policy="now")
 
         logger.info(f"Done combing!")
 

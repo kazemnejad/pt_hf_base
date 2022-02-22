@@ -1,22 +1,26 @@
+import random
+INITIAL_SEED = 12345
+random.seed(INITIAL_SEED)
+import numpy as np
+np.random.seed(INITIAL_SEED)
+import torch
+torch.manual_seed(INITIAL_SEED)
+torch.cuda.manual_seed_all(INITIAL_SEED)
+
+import json
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
-from wandb.util import generate_id as wandb_generate_id
+import _jsonnet
+import fire
 
+from common import py_utils, Params, JsonDict
 from common.nest import unflatten
 from common.py_utils import unique_experiment_name
 from runtime import Runtime
-
-import logging
-import sys
-
-import fire
-
-import json
-import _jsonnet
-
-from common import py_utils, Params, JsonDict
 
 logger = logging.getLogger("app")
 LOG_FORMAT = "%(levelname)s:%(name)-5s %(message)s"
@@ -26,7 +30,7 @@ handler = logging.StreamHandler(sys.stderr)
 handler.setFormatter(py_utils.NewLineFormatter(LOG_FORMAT))
 logger.addHandler(handler)
 
-DEFAULT_SEED = "123"
+DEFAULT_SEED = str(INITIAL_SEED)
 
 
 class EntryPoint(object):
