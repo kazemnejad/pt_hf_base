@@ -2,11 +2,13 @@ import copy
 import json
 import logging
 import os
+import random
 from collections import Sized
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Callable
 
 import _jsonnet
+import dill
 import numpy as np
 import torch
 import transformers
@@ -27,6 +29,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from wandb.sdk.wandb_run import Run
 
 import common.nest
+from analyzers import Analyzer
 from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
@@ -42,6 +45,7 @@ from common import (
     ExperimentStage,
     Params,
     JsonDict,
+    py_utils,
 )
 from common.py_utils import get_human_readable_count, chunks
 from data import DataLoaderFactory
@@ -124,38 +128,22 @@ class CustomProgressCallback(ProgressCallback):
 
 
 class ClLoggerForWandb(TrainerCallback):
-    def __init__(self, wandb_logger, log_dir: Path, num_examples_to_log: int = 0):
+    def __init__(
+        self,
+        wandb_logger,
+        log_dir: Path,
+        num_examples_to_log: int = 0,
+        num_reported_logs: int = 20,
+        inputs_transform_fn: Optional[
+            Callable[[List[JsonDict]], List[JsonDict]]
+        ] = None,
+    ):
         self._has_logged = False
         self._num_examples_to_log = num_examples_to_log
         self._log_dir = log_dir / "cl_sampler"
         self._logger = wandb_logger
-
-    def _log_to_wandb(self):
-        log_obj_dir = self._log_dir / "log_objs"
-        log_obj_paths = sorted(list(log_obj_dir.iterdir()))
-        with log_obj_paths[0].open("rb") as f:
-            import dill
-
-            obj = dill.load(f)
-        columns = sorted(common.nest.flatten(obj).keys())
-        table = wandb.Table(columns=columns)
-
-        for log_path in log_obj_paths:
-            with log_path.open("rb") as f:
-                import dill
-
-                obj = dill.load(f)
-                obj = common.nest.flatten(obj)
-                for k in obj.keys():
-                    if "_img" in k and obj[k] is not None:
-                        obj[k] = wandb.Image(obj[k])
-
-                flat_obj = sorted(obj.items(), key=lambda x: x[0])
-                flat_obj = [v for _, v in flat_obj]
-
-                table.add_data(*flat_obj)
-
-        self._logger.log({"cl_samples": table})
+        self._inputs_trans_fn = inputs_transform_fn
+        self._num_reported_logs = num_reported_logs
 
     def on_step_end(self, args, state, control, **kwargs):
         if state.is_world_process_zero and not self._has_logged:
@@ -167,6 +155,58 @@ class ClLoggerForWandb(TrainerCallback):
 
                 self._log_to_wandb()
                 self._has_logged = True
+
+    def _log_to_wandb(self):
+        log_obj_dir = self._log_dir / "log_objs"
+        log_obj_paths = sorted(list(log_obj_dir.iterdir()))
+
+        all_log_objs = []
+        for log_path in log_obj_paths:
+            with log_path.open("rb") as f:
+                obj = dill.load(f)
+
+                obj = common.nest.flatten(obj, "/")
+                for k in obj.keys():
+                    if "_img" in k and obj[k] is not None:
+                        obj[k] = wandb.Image(obj[k])
+
+                obj = common.nest.unflatten_list(obj, "/")
+
+                all_log_objs.append(obj)
+
+        if len(all_log_objs) == 0:
+            return
+
+        if self._inputs_trans_fn is not None:
+            all_log_objs = self._inputs_trans_fn(all_log_objs)
+
+        all_columns = sorted(common.nest.flatten(all_log_objs[0]["anchor"], "/").keys())
+
+        substructure_repr_cols = [
+            c for c in all_columns if c.startswith("substructure_repr_")
+        ]
+        priority_columns = ["eId", "type", *substructure_repr_cols]
+        other_columns = [c for c in all_columns if c not in priority_columns]
+        columns = priority_columns + other_columns
+
+        all_log_objs = random.sample(all_log_objs, k=self._num_reported_logs)
+
+        def convert_to_row(example: JsonDict, type: str) -> List[Any]:
+            example = common.nest.flatten(example, "/")
+            example["type"] = type
+            row = [example[k] for k in columns]
+            return row
+
+        for i, obj in enumerate(all_log_objs):
+            table = wandb.Table(columns=columns)
+
+            table.add_data(*convert_to_row(obj["anchor"], "anchor"))
+            for j, p in enumerate(obj["positives"]):
+                table.add_data(*convert_to_row(p, f"pos_{j}"))
+            for j, p in enumerate(obj["negatives"]):
+                table.add_data(*convert_to_row(p, f"negatives_{j}"))
+
+            self._logger.log({f"cl_samples/#{obj['idx']}": table})
 
 
 from transformers import trainer
@@ -190,7 +230,9 @@ class Seq2SeqRuntime(Runtime):
         hp_search_space: Optional[Lazy[HPSearchSpace]] = None,
         config_dict: Optional[Dict[str, Any]] = None,
         sweep_run: Optional[bool] = False,
+        analyzers: List[Optional[JsonDict]] = None,
         config_filenames: Optional[List[str]] = None,
+        **kwargs,
     ):
         self.lazy_model = model
         assert "type" in model
@@ -238,11 +280,13 @@ class Seq2SeqRuntime(Runtime):
 
         self.hp_search_space = hp_search_space or Lazy(HPSearchSpace)
 
+        self.analyzers = analyzers or []
+
     def write_meta_data(self):
         gpu_info = gpu_utils.get_cuda_info()
         if len(gpu_info) != 0:
-            for i, gi in enumerate(gpu_info):
-                self.logger.summary[f"gpus_info_{i}"] = gi
+            log_obj = {"gpus_info": {f"#{i}": gi for i, gi in enumerate(gpu_info)}}
+            self.logger.summary.update(log_obj)
 
             logger.info(f"GPUs Info: \n{json.dumps(gpu_info, indent=4)}")
 
@@ -254,7 +298,7 @@ class Seq2SeqRuntime(Runtime):
         if conf_path.exists():
             self.logger.save(str(conf_path.absolute()), policy="now")
 
-        dotenv_path = self.exp_root / "app.env"
+        dotenv_path = self.exp_root / "dotenv.txt"
         with dotenv_path.open("w") as f:
             for k, v in os.environ.items():
                 if k.startswith("APP_"):
@@ -271,7 +315,11 @@ class Seq2SeqRuntime(Runtime):
                     mode = "offline"
                 else:
                     mode = "online"
-
+                settings = wandb.Settings()
+                settings.update(
+                    _save_requirements=True,
+                    _disable_meta=False,
+                )
                 wandb.init(
                     dir=str(self.logs_dir),
                     config=self.config_dict,
@@ -352,6 +400,9 @@ class Seq2SeqRuntime(Runtime):
                     self.logger,
                     self.logs_dir,
                     num_cl_examples_to_log * training_args.dataloader_num_workers,
+                    inputs_transform_fn=getattr(
+                        model, "transform_inputs_for_logging", None
+                    ),
                 )
             )
 
@@ -417,6 +468,31 @@ class Seq2SeqRuntime(Runtime):
         else:
             logger.info(f"Initializing model from scratch")
 
+    def _load_best_checkpoint(self, trainer):
+        ckpt_dir = self.exp_root / "checkpoints"
+        last_checkpoint = self.get_last_checkpoint_path()
+        if (ckpt_dir / "trainer_state.json").exists():
+            trainer_state = json.load((ckpt_dir / "trainer_state.json").open())
+            best_model_checkpoint = trainer_state.get("best_model_checkpoint", None)
+        elif (
+            last_checkpoint is not None
+            and (last_checkpoint / "trainer_state.json").exists()
+        ):
+            trainer_state = json.load((last_checkpoint / "trainer_state.json").open())
+            best_model_checkpoint = trainer_state.get("best_model_checkpoint", None)
+        else:
+            best_model_checkpoint = None
+
+        if best_model_checkpoint is None:
+            logger.warning("Could not find the best checkpoint")
+            raise ValueError("Best checkpoint not found")
+
+        logger.info(f"Loading checkpoints from {best_model_checkpoint}")
+        state_dict = torch.load(
+            Path(best_model_checkpoint) / WEIGHTS_NAME, map_location="cpu"
+        )
+        trainer._load_state_dict_in_model(state_dict)
+
     def train(self, eval_split: str = "valid"):
         logger.info(f"*** Training ***")
         torch.cuda.empty_cache()
@@ -459,31 +535,6 @@ class Seq2SeqRuntime(Runtime):
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-    def _load_best_checkpoint(self, trainer):
-        ckpt_dir = self.exp_root / "checkpoints"
-        last_checkpoint = self.get_last_checkpoint_path()
-        if (ckpt_dir / "trainer_state.json").exists():
-            trainer_state = json.load((ckpt_dir / "trainer_state.json").open())
-            best_model_checkpoint = trainer_state.get("best_model_checkpoint", None)
-        elif (
-            last_checkpoint is not None
-            and (last_checkpoint / "trainer_state.json").exists()
-        ):
-            trainer_state = json.load((last_checkpoint / "trainer_state.json").open())
-            best_model_checkpoint = trainer_state.get("best_model_checkpoint", None)
-        else:
-            best_model_checkpoint = None
-
-        if best_model_checkpoint is None:
-            logger.warning("Could not find the best checkpoint")
-            raise ValueError("Best checkpoint not found")
-
-        logger.info(f"Loading checkpoints from {best_model_checkpoint}")
-        state_dict = torch.load(
-            Path(best_model_checkpoint) / WEIGHTS_NAME, map_location="cpu"
-        )
-        trainer._load_state_dict_in_model(state_dict)
-
     def evaluate(self, split: str = "test", load_best: bool = True):
         logger.info(f"*** Evaluate on {split} ***")
         torch.cuda.empty_cache()
@@ -516,15 +567,6 @@ class Seq2SeqRuntime(Runtime):
 
         self.log_metrics_to_console(f"eval_{split}", metrics)
         trainer.save_metrics(f"eval_{split}", metrics)
-
-    def train_and_evaluate(
-        self,
-        eval_split: str = "valid",
-        test_split: str = "test",
-        load_best: bool = True,
-    ):
-        self.train(eval_split)
-        self.evaluate(test_split, load_best=load_best)
 
     def predict(
         self, split: str = "test", enable_metrics: bool = False, load_best: bool = True
@@ -581,6 +623,15 @@ class Seq2SeqRuntime(Runtime):
 
             self.logger.save(str(output_test_preds_file.absolute()), policy="now")
 
+    def train_and_evaluate(
+        self,
+        eval_split: str = "valid",
+        test_split: str = "test",
+        load_best: bool = True,
+    ):
+        self.train(eval_split)
+        self.evaluate(test_split, load_best=load_best)
+
     def combine_pred(self, split: str = "test"):
         logger.info(f"*** Combing predictions on split: {split} ***")
 
@@ -595,7 +646,9 @@ class Seq2SeqRuntime(Runtime):
         with prediction_path.open() as inf:
             lines_out = inf.readlines()
 
-        pred_table = wandb.Table(columns=["id", "input", "gold", "prediction"])
+        pred_table = wandb.Table(
+            columns=["id", "input", "gold", "prediction", "is_correct"]
+        )
         combined_file = self.exp_root / f"pred_combined_{split}.txt"
         with combined_file.open("w") as outf:
             for i, (l_in, l_out) in enumerate(zip(lines_in, lines_out)):
@@ -606,9 +659,11 @@ class Seq2SeqRuntime(Runtime):
                 outf.write("\n")
 
                 x, y = l_in.split("\t")
-                pred_table.add_data(i, x.strip(), y.strip(), l_out.strip())
+                pred_table.add_data(
+                    i, x.strip(), y.strip(), l_out.strip(), y.strip() == l_out.strip()
+                )
 
-        self.logger.log({"prediction_table": pred_table})
+        self.logger.log({f"pred_{split}/model_outputs": pred_table})
         self.logger.save(str(combined_file.absolute()), policy="now")
 
         logger.info(f"Done combing!")
@@ -621,6 +676,79 @@ class Seq2SeqRuntime(Runtime):
         self.train(eval_split)
         self.predict(eval_split, load_best=load_best, enable_metrics=True)
         self.combine_pred(eval_split)
+        self.analyze_all(load_best=load_best)
+
+    def analyze(self, config_filenames: str, load_best: bool = True):
+        config_filenames = [fn.strip() for fn in config_filenames.split(",")]
+        config_obj = py_utils.load_jsonnet_config(config_filenames)
+
+        logger.info(f"*** Analyzing ***")
+        logger.info(f"config_files: {config_filenames}")
+        torch.cuda.empty_cache()
+        if "load_best_model_at_end" in self.training_args:
+            self.training_args.pop("load_best_model_at_end")
+
+        trainer = self.create_trainer(ExperimentStage.PREDICTION)
+        if load_best:
+            try:
+                self._load_best_checkpoint(trainer)
+            except:
+                logger.info("Loading last checkpoint...")
+                self._load_last_checkpoint(trainer)
+        else:
+            logger.info("Loading last checkpoint...")
+            self._load_last_checkpoint(trainer)
+
+        analyzer = Analyzer.from_params(
+            Params(config_obj),
+            model=trainer.model,
+            logger=self.logger,
+            dl_factory=self.dl_factory,
+            device=trainer.args.device,
+            batch_size=trainer.args.eval_batch_size,
+            num_beams=trainer.args.generation_num_beams,
+            max_length=trainer.args.generation_max_length,
+            exp_root=self.exp_root,
+        )
+
+        logger.info(f"Using {analyzer.__class__.__name__}...")
+        analyzer.analyze()
+
+    def analyze_all(self, load_best: bool = True):
+        if self.analyzers is None:
+            logger.warning("self.analyzers is None. Exiting...")
+            return
+
+        torch.cuda.empty_cache()
+        if "load_best_model_at_end" in self.training_args:
+            self.training_args.pop("load_best_model_at_end")
+
+        trainer = self.create_trainer(ExperimentStage.PREDICTION)
+        if load_best:
+            try:
+                self._load_best_checkpoint(trainer)
+            except:
+                logger.info("Loading last checkpoint...")
+                self._load_last_checkpoint(trainer)
+        else:
+            logger.info("Loading last checkpoint...")
+            self._load_last_checkpoint(trainer)
+
+        for config_obj in self.analyzers:
+            analyzer = Analyzer.from_params(
+                Params(config_obj),
+                model=trainer.model,
+                logger=self.logger,
+                dl_factory=self.dl_factory,
+                device=trainer.args.device,
+                batch_size=trainer.args.eval_batch_size,
+                num_beams=trainer.args.generation_num_beams,
+                max_length=trainer.args.generation_max_length,
+                exp_root=self.exp_root,
+            )
+
+            logger.info(f"Using {analyzer.__class__.__name__}...")
+            analyzer.analyze()
 
     def hp_tune(self, eval_split: str = "valid"):
         logger.info(f"*** Hyperparameter Tuning (on split: {eval_split}) ***")

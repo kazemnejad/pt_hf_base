@@ -65,7 +65,6 @@ def add_python_paths(script):
         "export PYTHONPATH=$HOME/.local/lib/python3.9/site-packages/:$PYTHONPATH\n"
     )
     script += "\n\n#pip install --user -r src/requirements.txt\n"
-    script += "\n\npip install --user scipy\n"
     return script
 
 
@@ -86,7 +85,6 @@ def make_run_script_seeds(
 
     # script += f"export WANDB_RUN_ID={exp_key}\n"
     script += f"export WANDB_RUN_GROUP=SE-{exp_name}\n"
-    script += f"export WANDB_JOB_TYPE=training_seed\n"
     script += f"export ORIG_APP_EXPERIMENT_NAME={exp_name}\n"
     script += f"export ORIG_WANDB_RUN_ID={exp_key}\n"
 
@@ -97,7 +95,10 @@ def make_run_script_seeds(
     script += f"for SEED in `seq 1 {seeds}`; do\n"
     script += f"\texport APP_DIRECTORY=experiments/{exp_name}\n"
     script += f"\texport APP_EXPERIMENT_NAME=seed_$SEED\n"
-    script += f"\texport APP_SEED=$SEED\n\n"
+    script += f"\texport APP_SEED=$SEED\n"
+    script += f"\texport WANDB_JOB_TYPE=exp\n"
+    script += f"\texport WANDB_RUN_ID={exp_key}_seed_$SEED\n\n"
+
     for c in commands.split(","):
         c = c.strip()
         script += f"\tpython src/main.py --configs '{configs_str}' \\\n"
@@ -127,6 +128,7 @@ def make_run_script_sweep_job(
     seeds: int,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
+    script += "\nexport WANDB_JOB_TYPE=exp\n\n\n"
 
     configs_str = configs
     for c in commands.split(","):
@@ -236,14 +238,27 @@ def main(args: argparse.Namespace):
     if args.name is not None:
         exp_name += args.name
 
-    group = None
-    if args.seeds is not None:
-        group = f"SE-{exp_name}"
-
     import wandb
+
+    group = "general"
+    job_type = "exp"
+    if args.seeds is not None:
+        job_type = "seed_launcher"
+        group = f"SE-{exp_name}"
+    elif args.sweep_id is not None:
+        job_type = "agent"
+        group = f"sweep-{os.path.basename(args.sweep_id)}"
 
     dir_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
     dir_dir.mkdir(parents=True, exist_ok=True)
+    settings = wandb.Settings()
+    settings.update(
+        disable_code=True,
+        disable_git=True,
+        silent=True,
+        _save_requirements=False,
+        _disable_meta=True,
+    )
     run = wandb.init(
         project=project,
         dir=dir_dir,
@@ -253,8 +268,10 @@ def main(args: argparse.Namespace):
         mode="online",
         force=True,
         save_code=False,
-        settings=wandb.Settings(disable_code=True, disable_git=True, silent=True),
+        settings=settings,
+        job_type=job_type,
     )
+
     run_id = run.id
 
     job_script_path = None
@@ -277,7 +294,7 @@ def main(args: argparse.Namespace):
     metadata_path = make_metadata(exp_name, run_id)
 
     artifact_name = f"bundle-{run_id}"
-    artifact = wandb.Artifact(name=artifact_name, type="bundle")
+    artifact = wandb.Artifact(name=artifact_name, type="code")
     artifact.add_dir("configs", "configs/")
     artifact.add_dir("src", "src/")
     artifact.add_dir("scripts", "scripts/")
@@ -289,6 +306,15 @@ def main(args: argparse.Namespace):
     artifact.metadata["data"] = args.dataset
 
     run.log_artifact(artifact)
+
+    if args.dataset is not None:
+        data_art_name = args.dataset
+        if ":" not in data_art_name:
+            data_art_name += ":latest"
+        # api = wandb.Api(overrides={"project": project})
+        print(data_art_name)
+        run.use_artifact(data_art_name)
+
     run.finish()
 
     print(f"\n\nExp name: {exp_name}")
