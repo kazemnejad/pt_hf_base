@@ -272,3 +272,4 @@ dataset/
 dumps/
 model_outputs/
 /data/
+/.vscode/

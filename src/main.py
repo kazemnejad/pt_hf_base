@@ -1,9 +1,12 @@
 import random
+
 INITIAL_SEED = 12345
 random.seed(INITIAL_SEED)
 import numpy as np
+
 np.random.seed(INITIAL_SEED)
 import torch
+
 torch.manual_seed(INITIAL_SEED)
 torch.cuda.manual_seed_all(INITIAL_SEED)
 
@@ -17,7 +20,7 @@ from typing import Dict, Any, List
 import _jsonnet
 import fire
 
-from common import py_utils, Params, JsonDict
+from common import py_utils, Params, JsonDict, DEBUG_MODE
 from common.nest import unflatten
 from common.py_utils import unique_experiment_name
 from runtime import Runtime
@@ -62,6 +65,11 @@ class EntryPoint(object):
 
         config = self._patch_config_obj_for_di(config)
 
+        try:
+            DEBUG_MODE = config["global_vars"]["debug_mode"]
+        except:
+            pass
+
         self._config = config
         self._exp = Runtime.from_params(Params({"config_dict": config, **config}))
 
@@ -85,9 +93,18 @@ class EntryPoint(object):
         config["directory"] = str(exps_dir)
         config["exp_name"] = run_id
 
-        run = wandb.init(name=f"{orig_exp_name}___{run_id}", allow_val_change=True)
+        run = wandb.init(allow_val_change=True)
         new_hyperparams = run.config.as_dict()
-        new_hyperparams = {k:v for k,v in new_hyperparams.items() if not k.startswith("_wandb")}
+        new_hyperparams = {
+            k: v for k, v in new_hyperparams.items() if not k.startswith("_wandb")
+        }
+        run_name = sorted(
+            [(k.split(".")[-1], v) for k, v in new_hyperparams.items()],
+            key=lambda x: x[0],
+        )
+        run_name = "_".join(f"{k[:2]+k[-2:]}:{str(v)}" for k, v in run_name)
+        run.name = f"{run_name}___{run_id}"
+
         new_hyperparams = unflatten(new_hyperparams, ".")
         logger.info(f"New hyperparams: {new_hyperparams}")
 
@@ -101,7 +118,6 @@ class EntryPoint(object):
 
         run.config.update(patched_config)
 
-
         return patched_config
 
     def _patch_config_obj_for_di(self, config):
@@ -113,7 +129,9 @@ class EntryPoint(object):
     def _dump_config_obj(self, config):
         exp_root = Path(config.get("directory", "experiments")) / config["exp_name"]
         exp_root.mkdir(parents=True, exist_ok=True)
-        json.dump(config, (exp_root / "config.json").open("w"), indent=4, sort_keys=True)
+        json.dump(
+            config, (exp_root / "config.json").open("w"), indent=4, sort_keys=True
+        )
 
     def _load_config_obj(self, filenames: List[str]) -> Dict[str, Any]:
         ext_vars = {k: v for k, v in os.environ.items() if k.startswith("APP_")}

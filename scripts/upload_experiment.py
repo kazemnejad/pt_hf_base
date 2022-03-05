@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from wandb.sdk.lib import filenames
+
 site.addsitedir("src/")
 
 from wandb import env as wandb_env
@@ -221,6 +223,15 @@ def get_exp_name(configs):
     return exp_name
 
 
+def add_source_code(art):
+    root = "src/"
+    root = os.path.abspath(root)
+    exclude_fn = lambda path: path.endswith(".pyc") or path.endswith("__pycache__")
+    for file_path in filenames.filtered_dir(root, lambda p: True, exclude_fn):
+        save_name = os.path.relpath(file_path, root)
+        art.add_file(file_path, name=f"src/{save_name}")
+
+
 def main(args: argparse.Namespace):
     project: str = args.project
     configs: str = args.configs
@@ -296,7 +307,8 @@ def main(args: argparse.Namespace):
     artifact_name = f"bundle-{run_id}"
     artifact = wandb.Artifact(name=artifact_name, type="code")
     artifact.add_dir("configs", "configs/")
-    artifact.add_dir("src", "src/")
+    # artifact.add_dir("src", "src/")
+    add_source_code(artifact)
     artifact.add_dir("scripts", "scripts/")
     artifact.add_file(str(run_script_path), "run.sh")
     artifact.add_file(str(metadata_path), "metadata.json")
@@ -312,7 +324,6 @@ def main(args: argparse.Namespace):
         if ":" not in data_art_name:
             data_art_name += ":latest"
         # api = wandb.Api(overrides={"project": project})
-        print(data_art_name)
         run.use_artifact(data_art_name)
 
     run.finish()

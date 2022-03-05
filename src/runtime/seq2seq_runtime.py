@@ -204,7 +204,7 @@ class ClLoggerForWandb(TrainerCallback):
             for j, p in enumerate(obj["positives"]):
                 table.add_data(*convert_to_row(p, f"pos_{j}"))
             for j, p in enumerate(obj["negatives"]):
-                table.add_data(*convert_to_row(p, f"negatives_{j}"))
+                table.add_data(*convert_to_row(p, f"neg_{j}"))
 
             self._logger.log({f"cl_samples/#{obj['idx']}": table})
 
@@ -285,8 +285,8 @@ class Seq2SeqRuntime(Runtime):
     def write_meta_data(self):
         gpu_info = gpu_utils.get_cuda_info()
         if len(gpu_info) != 0:
-            log_obj = {"gpus_info": {f"#{i}": gi for i, gi in enumerate(gpu_info)}}
-            self.logger.summary.update(log_obj)
+            # log_obj = {f"gpus_info/#{i}/": gi for i, gi in enumerate(gpu_info)}
+            # self.logger.summary.update(log_obj)
 
             logger.info(f"GPUs Info: \n{json.dumps(gpu_info, indent=4)}")
 

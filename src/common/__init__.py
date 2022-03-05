@@ -29,3 +29,5 @@ class ExperimentStage(Enum):
             "predict": ExperimentStage.PREDICTION,
         }[split]
         return stage
+
+DEBUG_MODE = False
