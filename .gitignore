@@ -263,8 +263,7 @@ fabric.properties
 /assets/
 /wandb/
 
-.idea
-third_parties/
+/third_parties/
 
 
 .vscode/settings.json
@@ -272,4 +271,3 @@ dataset/
 dumps/
 model_outputs/
 /data/
-/.vscode/
