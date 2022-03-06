@@ -9,6 +9,8 @@ from transformers import (
 from models.base_model import Model, HfModelConfig
 from tokenization_utils import Tokenizer
 
+from transformers import GPTNeoForCausalLM
+
 logger = logging.getLogger("app")
 
 
