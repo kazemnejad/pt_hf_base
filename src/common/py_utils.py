@@ -193,5 +193,17 @@ def load_config_object(filenames: List[str]) -> JsonDict:
     return config
 
 
+def load_jsonnet_config(filenames: List[str]) -> JsonDict:
+    import _jsonnet
+    import json
+
+    ext_vars = {k: v for k, v in os.environ.items() if k.startswith("APP_")}
+    ext_vars["seed"] = os.environ.get("APP_SEED", "12345")
+    jsonnet_str = "+".join([f'(import "{f}")' for f in filenames])
+    json_str = _jsonnet.evaluate_snippet("snippet", jsonnet_str, ext_vars=ext_vars)
+    config: Dict[str, Any] = json.loads(json_str)
+    return config
+
+
 def eval_bool_env_var(key: str) -> bool:
     return os.environ.get(key, "False").lower() in ["true", "1", "yes", "y", "t"]
