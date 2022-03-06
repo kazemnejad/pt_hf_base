@@ -33,7 +33,7 @@ from analyzers import Analyzer
 from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
-from modules.decoder_only_trainer import DecoderOnlyTrainer
+from modules.trainer_with_metrics import Seq2SeqTrainerWithMetrics
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
 
@@ -366,8 +366,6 @@ class Seq2SeqRuntime(Runtime):
             model = model_class.from_pretrained(hf_model_name, **model_kwargs)
         else:
             model = model_constructor(**model_kwargs)
-            if hasattr(model, "post_checkpoint_load"):
-                model.post_checkpoint_load()
 
         return model
 
@@ -408,7 +406,7 @@ class Seq2SeqRuntime(Runtime):
                 )
             )
 
-        trainer = DecoderOnlyTrainer(
+        trainer = Seq2SeqTrainerWithMetrics(
             args=training_args,
             tokenizer=getattr(self.dl_factory, "tokenizer", None),
             data_collator=self.dl_factory.get_collate_fn(stage),
@@ -611,22 +609,17 @@ class Seq2SeqRuntime(Runtime):
             if len(preds.shape) == 3:
                 preds = np.argmax(preds, axis=-1)
 
-            output_test_preds_file = self.exp_root / f"pred_out_{split}.jsonl"
+            output_test_preds_file = self.exp_root / f"pred_out_{split}.txt"
             with output_test_preds_file.open("w") as writer:
-                all_objs = []
                 for batch_preds in chunks(preds, 128):
                     pred_texts = self.tokenizer.batch_decode(
                         batch_preds,
                         skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False,
                     )
                     pred_texts = [pred.strip() for pred in pred_texts]
-
                     for pt in pred_texts:
-                        all_objs.append({"prediction": pt})
-
-                import jsonlines
-
-                jsonlines.Writer(writer).write_all(all_objs)
+                        writer.write(f"{pt}\n")
 
             self.logger.save(str(output_test_preds_file.absolute()), policy="now")
 
@@ -642,37 +635,33 @@ class Seq2SeqRuntime(Runtime):
     def combine_pred(self, split: str = "test"):
         logger.info(f"*** Combing predictions on split: {split} ***")
 
-        prediction_path = self.exp_root / f"pred_out_{split}.jsonl"
+        prediction_path = self.exp_root / f"pred_out_{split}.txt"
         logger.info(f"Prediction path: {prediction_path}")
         assert prediction_path.exists()
 
         stage = ExperimentStage.from_split(split)
 
-        import jsonlines
-
-        lines_in = []
-        with jsonlines.open(self.dl_factory.get_ds_file_path(stage)) as reader:
-            for obj in reader:
-                lines_in.append(obj)
-
-        lines_out = []
-        with jsonlines.open(str(prediction_path)) as reader:
-            for obj in reader:
-                lines_out.append(obj)
+        with open(self.dl_factory.get_ds_file_path(stage)) as inf:
+            lines_in = inf.readlines()
+        with prediction_path.open() as inf:
+            lines_out = inf.readlines()
 
         pred_table = wandb.Table(
             columns=["id", "input", "gold", "prediction", "is_correct"]
         )
-        combined_file = self.exp_root / f"pred_combined_{split}.jsonl"
-        with jsonlines.open(str(combined_file), mode="w") as writer:
+        combined_file = self.exp_root / f"pred_combined_{split}.txt"
+        with combined_file.open("w") as outf:
             for i, (l_in, l_out) in enumerate(zip(lines_in, lines_out)):
-                l_in.update(l_out)
-                l_in["id"] = i
-                writer.write(l_in)
+                outf.write(str(i) + "\n")
+                for p in l_in.split("\t"):
+                    outf.write(p.strip() + "\n")
+                outf.write(l_out.strip() + "\n")
+                outf.write("\n")
 
-                x = l_in["source"]
-                y = "\n".join(l_in["scratchpad"]) + "\n" + l_in["target"]
-                pred_table.add_data(i, x.strip(), y.strip(), l_out["prediction"].strip(), "-")
+                x, y = l_in.split("\t")
+                pred_table.add_data(
+                    i, x.strip(), y.strip(), l_out.strip(), y.strip() == l_out.strip()
+                )
 
         self.logger.log({f"pred_{split}/model_outputs": pred_table})
         self.logger.save(str(combined_file.absolute()), policy="now")

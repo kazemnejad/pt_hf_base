@@ -15,6 +15,3 @@ class HfModelConfig(PretrainedConfig, Registrable):
             return cls(**kwargs)
         else:
             return cls.from_pretrained(pretrained_name, **kwargs)
-
-    def post_checkpoint_load(self):
-        pass
