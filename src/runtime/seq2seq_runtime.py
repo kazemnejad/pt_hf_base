@@ -223,7 +223,7 @@ class Seq2SeqRuntime(Runtime):
         # model: Lazy[Model],
         model: JsonDict,
         dataset: Lazy[DataLoaderFactory],
-        tokenizer: Lazy[Tokenizer],
+        tokenizer: Optional[Lazy[Tokenizer]] = None,
         trainer: Optional[Dict[str, Any]] = None,
         directory: Optional[str] = "experiments",
         global_vars: Optional[Dict[str, Any]] = None,
@@ -271,11 +271,15 @@ class Seq2SeqRuntime(Runtime):
         )
         self.write_meta_data()
 
-        self.tokenizer = tokenizer.construct(
-            dataset=self.dl_factory,
-            experiment_root=self.exp_root,
-            cache_dir=self.cache_dir,
-        )
+        if tokenizer is not None:
+            self.tokenizer = tokenizer.construct(
+                dataset=self.dl_factory,
+                experiment_root=self.exp_root,
+                cache_dir=self.cache_dir,
+            )
+        else:
+            self.tokenizer = None
+
         self.dl_factory.set_tokenizer(self.tokenizer)
 
         self.hp_search_space = hp_search_space or Lazy(HPSearchSpace)
