@@ -315,7 +315,8 @@ def main(args: argparse.Namespace):
     if job_script_path is not None:
         artifact.add_file(str(job_script_path), "job.sh")
 
-    artifact.metadata["data"] = args.dataset
+    if args.dataset is not None:
+        artifact.metadata["data"] = args.dataset
 
     run.log_artifact(artifact)
 
