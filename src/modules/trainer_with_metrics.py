@@ -1,11 +1,14 @@
 from typing import Dict
 
 import torch
-from transformers import Seq2SeqTrainer, EvalPrediction, IntervalStrategy
+from transformers import EvalPrediction, IntervalStrategy
 from transformers.trainer_pt_utils import nested_numpify
 
+from modules.base_trainer import BaseTrainer
 
-class Seq2SeqTrainerWithMetrics(Seq2SeqTrainer):
+
+@BaseTrainer.register("seq2seq_trainer_with_metrics")
+class Seq2SeqTrainerWithMetrics(BaseTrainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         """
         How the loss is computed by Trainer. By default, all models return the loss in the first element.
@@ -66,3 +69,6 @@ class Seq2SeqTrainerWithMetrics(Seq2SeqTrainer):
             EvalPrediction(predictions=logits, label_ids=labels)
         )
         return metrics
+
+
+BaseTrainer.default_implementation = "seq2seq_trainer_with_metrics"

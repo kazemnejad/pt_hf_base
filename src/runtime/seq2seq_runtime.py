@@ -33,6 +33,7 @@ from analyzers import Analyzer
 from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
+from modules import BaseTrainer
 from modules.trainer_with_metrics import Seq2SeqTrainerWithMetrics
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
@@ -386,6 +387,9 @@ class Seq2SeqRuntime(Runtime):
         if kwargs.get("eval_dataset", None) is None:
             training_args["evaluation_strategy"] = "no"
 
+        trainer_type = training_args.pop("type", BaseTrainer.default_implementation)
+        trainer_class = BaseTrainer.resolve_class_name(trainer_type)[0]
+
         training_args = Seq2SeqTrainingArguments(**training_args)
 
         data_collator = self.dl_factory.get_collate_fn(stage)
@@ -394,28 +398,12 @@ class Seq2SeqRuntime(Runtime):
         except Exception as exp:
             logger.warning(exp)
 
-        cl_logger_callbacks = []
-        ds_conf_dict = self.lazy_dataset._params.as_flat_dict()
-        found_keys = [k for k in ds_conf_dict.keys() if "num_cl_examples_to_log" in k]
-        if len(found_keys) == 1:
-            num_cl_examples_to_log = ds_conf_dict[found_keys[0]]
-            cl_logger_callbacks.append(
-                ClLoggerForWandb(
-                    self.logger,
-                    self.logs_dir,
-                    num_cl_examples_to_log * training_args.dataloader_num_workers,
-                    inputs_transform_fn=getattr(
-                        model, "transform_inputs_for_logging", None
-                    ),
-                )
-            )
-
-        trainer = Seq2SeqTrainerWithMetrics(
+        trainer = trainer_class(
             args=training_args,
             tokenizer=getattr(self.dl_factory, "tokenizer", None),
             data_collator=self.dl_factory.get_collate_fn(stage),
             compute_metrics=self.dl_factory.get_compute_metric_fn(stage),
-            callbacks=[CustomWandbCallback()] + cl_logger_callbacks,
+            callbacks=[CustomWandbCallback()],
             **kwargs,
         )
 
