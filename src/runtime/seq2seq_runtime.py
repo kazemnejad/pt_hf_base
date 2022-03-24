@@ -601,17 +601,22 @@ class Seq2SeqRuntime(Runtime):
             if len(preds.shape) == 3:
                 preds = np.argmax(preds, axis=-1)
 
-            output_test_preds_file = self.exp_root / f"pred_out_{split}.txt"
+            output_test_preds_file = self.exp_root / f"pred_out_{split}.jsonl"
             with output_test_preds_file.open("w") as writer:
+                all_objs = []
                 for batch_preds in chunks(preds, 128):
                     pred_texts = self.tokenizer.batch_decode(
                         batch_preds,
                         skip_special_tokens=True,
-                        clean_up_tokenization_spaces=False,
                     )
                     pred_texts = [pred.strip() for pred in pred_texts]
+
                     for pt in pred_texts:
-                        writer.write(f"{pt}\n")
+                        all_objs.append({"prediction": pt})
+
+                import jsonlines
+
+                jsonlines.Writer(writer).write_all(all_objs)
 
             self.logger.save(str(output_test_preds_file.absolute()), policy="now")
 
@@ -627,32 +632,53 @@ class Seq2SeqRuntime(Runtime):
     def combine_pred(self, split: str = "test"):
         logger.info(f"*** Combing predictions on split: {split} ***")
 
-        prediction_path = self.exp_root / f"pred_out_{split}.txt"
+        prediction_path = self.exp_root / f"pred_out_{split}.jsonl"
         logger.info(f"Prediction path: {prediction_path}")
         assert prediction_path.exists()
 
         stage = ExperimentStage.from_split(split)
 
-        with open(self.dl_factory.get_ds_file_path(stage)) as inf:
-            lines_in = inf.readlines()
-        with prediction_path.open() as inf:
-            lines_out = inf.readlines()
+        import jsonlines
+
+        lines_in = []
+        with jsonlines.open(self.dl_factory.get_ds_file_path(stage)) as reader:
+            for obj in reader:
+                lines_in.append(obj)
+
+        lines_out = []
+        with jsonlines.open(str(prediction_path)) as reader:
+            for obj in reader:
+                lines_out.append(obj)
 
         pred_table = wandb.Table(
-            columns=["id", "input", "gold", "prediction", "is_correct"]
+            columns=[
+                "idx",
+                "input",
+                "gold",
+                "prediction",
+                "is_correct",
+            ]
         )
-        combined_file = self.exp_root / f"pred_combined_{split}.txt"
-        with combined_file.open("w") as outf:
-            for i, (l_in, l_out) in enumerate(zip(lines_in, lines_out)):
-                outf.write(str(i) + "\n")
-                for p in l_in.split("\t"):
-                    outf.write(p.strip() + "\n")
-                outf.write(l_out.strip() + "\n")
-                outf.write("\n")
+        combined_file = self.exp_root / f"pred_combined_{split}.jsonl"
+        with jsonlines.open(str(combined_file), mode="w") as writer:
+            for i, (obj_ds, obj_pred) in enumerate(zip(lines_in, lines_out)):
+                obj_ds.update(obj_pred)
+                obj_ds["id"] = i
+                writer.write(obj_ds)
 
-                x, y = l_in.split("\t")
+                x = obj_ds["source"]
+                y = obj_ds["target"].strip()
+
+                prediction = obj_pred["prediction"].strip()
+
+                is_correct = y == prediction
+
                 pred_table.add_data(
-                    i, x.strip(), y.strip(), l_out.strip(), y.strip() == l_out.strip()
+                    i,
+                    x.strip(),
+                    y.strip(),
+                    prediction,
+                    is_correct,
                 )
 
         self.logger.log({f"pred_{split}/model_outputs": pred_table})
