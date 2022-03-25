@@ -372,6 +372,9 @@ class Seq2SeqRuntime(Runtime):
         else:
             model = model_constructor(**model_kwargs)
 
+        if hasattr(model, "post_checkpoint_load"):
+            model.post_checkpoint_load()
+
         return model
 
     def create_trainer(self, stage: ExperimentStage, **kwargs) -> Seq2SeqTrainer:
