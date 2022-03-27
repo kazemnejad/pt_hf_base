@@ -357,6 +357,7 @@ class Seq2SeqRuntime(Runtime):
         model_class = Model.resolve_class_name(model_type)[0]
 
         from_pretrained = lazy_model.pop("from_pretrained", False)
+        pretrained_path = lazy_model.pop("pretrained_path", None)
 
         model_kwargs = create_kwargs(
             model_constructor,
@@ -367,8 +368,14 @@ class Seq2SeqRuntime(Runtime):
         )
 
         if from_pretrained:
-            hf_model_name = lazy_model["hf_model_name"]
-            model = model_class.from_pretrained(hf_model_name, **model_kwargs)
+            if pretrained_path is not None:
+                exp_root_dir = self.config_dict["dirs"]["experiments"]
+                arg = str(exp_root_dir / pretrained_path / "checkpoints")
+            else:
+                arg = lazy_model["hf_model_name"]
+
+            logger.info(f"Loading initial model weights from {arg}...")
+            model = model_class.from_pretrained(arg, **model_kwargs)
         else:
             model = model_constructor(**model_kwargs)
 
