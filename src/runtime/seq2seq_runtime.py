@@ -622,6 +622,7 @@ class Seq2SeqRuntime(Runtime):
                     pred_texts = self.tokenizer.batch_decode(
                         batch_preds,
                         skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False,
                     )
                     pred_texts = [pred.strip() for pred in pred_texts]
 
