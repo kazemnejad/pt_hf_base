@@ -28,13 +28,15 @@ class Seq2SeqT5(T5ForConditionalGeneration, Model):
         assert config is not None
         super().__init__(config)
 
-        # For some reason T5's number of embeddings > vocab_size,
-        # and apparently those extra embedding are not used by default.
-        # So, we can use them for our re-sized vocab_size
+        self.handle_tokenizer(tokenizer)
+
+    def handle_tokenizer(self, tokenizer: Optional[Tokenizer] = None):
+        if tokenizer is None:
+            return
+
         if (
-            tokenizer is not None
-            and len(tokenizer) > self.shared.num_embeddings
-            or len(tokenizer) < config.vocab_size
+            len(tokenizer) > self.shared.num_embeddings
+            or len(tokenizer) < self.config.vocab_size
         ):
             logger.info(
                 f"Resizing num_embeddings to {len(tokenizer)} (Previously, {self.shared.num_embeddings})"

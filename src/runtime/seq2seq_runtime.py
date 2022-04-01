@@ -15,6 +15,7 @@ import transformers
 import wandb
 from overrides import overrides
 from torch import nn
+from tqdm import tqdm
 from transformers import (
     set_seed,
     Seq2SeqTrainer,
@@ -34,7 +35,6 @@ from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
 from modules import BaseTrainer
-from modules.trainer_with_metrics import Seq2SeqTrainerWithMetrics
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
 
@@ -367,20 +367,24 @@ class Seq2SeqRuntime(Runtime):
             cache_dir=self.cache_dir,
         )
 
+        has_handled_tokenizer = False
         if from_pretrained:
             if pretrained_path is not None:
-                exp_root_dir = self.config_dict["dirs"]["experiments"]
-                arg = str(exp_root_dir / pretrained_path / "checkpoints")
+                exp_root_dir = self.global_vars["dirs"]["experiments"]
+                arg = str(Path(exp_root_dir) / pretrained_path / "checkpoints")
+                has_handled_tokenizer = True
             else:
                 arg = lazy_model["hf_model_name"]
+                _ = model_kwargs.pop("tokenizer")
 
             logger.info(f"Loading initial model weights from {arg}...")
             model = model_class.from_pretrained(arg, **model_kwargs)
         else:
             model = model_constructor(**model_kwargs)
+            has_handled_tokenizer = True
 
-        if hasattr(model, "post_checkpoint_load"):
-            model.post_checkpoint_load()
+        if hasattr(model, "handle_tokenizer") and not has_handled_tokenizer:
+            model.handle_tokenizer(self.tokenizer)
 
         return model
 
@@ -649,47 +653,56 @@ class Seq2SeqRuntime(Runtime):
         stage = ExperimentStage.from_split(split)
 
         import jsonlines
-
-        lines_in = []
-        with jsonlines.open(self.dl_factory.get_ds_file_path(stage)) as reader:
-            for obj in reader:
-                lines_in.append(obj)
+        import diff_match_patch as dmp_module
 
         lines_out = []
         with jsonlines.open(str(prediction_path)) as reader:
             for obj in reader:
                 lines_out.append(obj)
 
+        input_ds = self.dl_factory.get_dataset(stage)
+        assert len(input_ds) == len(lines_out)
+
         pred_table = wandb.Table(
-            columns=[
-                "idx",
-                "input",
-                "gold",
-                "prediction",
-                "is_correct",
-            ]
+            columns=["idx", "input", "gold", "prediction", "is_correct", "diff"]
         )
         combined_file = self.exp_root / f"pred_combined_{split}.jsonl"
+
         with jsonlines.open(str(combined_file), mode="w") as writer:
-            for i, (obj_ds, obj_pred) in enumerate(zip(lines_in, lines_out)):
-                obj_ds.update(obj_pred)
-                obj_ds["id"] = i
-                writer.write(obj_ds)
-
-                x = obj_ds["source"]
-                y = obj_ds["target"].strip()
-
-                prediction = obj_pred["prediction"].strip()
-
-                is_correct = y == prediction
-
-                pred_table.add_data(
-                    i,
-                    x.strip(),
-                    y.strip(),
-                    prediction,
-                    is_correct,
+            for (obj_ds, obj_pred) in tqdm(zip(input_ds, lines_out)):
+                prompt = self.tokenizer.decode(
+                    obj_ds["input_ids"],
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=False,
                 )
+                labels = [t for t in obj_ds["labels"] if t != -100]
+                target = self.tokenizer.decode(
+                    labels, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                )
+
+                idx = obj_ds["idx"]
+                obj_pred["prompt"] = prompt
+                obj_pred["target"] = target
+                obj_pred["idx"] = idx
+
+                writer.write(obj_pred)
+
+                prediction = obj_pred["prediction"]
+
+                if prediction[: len(prompt)] == prompt:
+                    prediction = prediction[len(prompt) :]
+
+                is_correct = prediction == target
+                if not is_correct:
+                    dmp = dmp_module.diff_match_patch()
+                    diff = dmp.diff_main(target, prediction)
+                    dmp.diff_cleanupSemantic(diff)
+                    diff = dmp.diff_prettyHtml(diff)
+                    diff = wandb.Html(diff)
+                else:
+                    diff = wandb.Html("")
+
+                pred_table.add_data(idx, prompt, target, prediction, is_correct, diff)
 
         self.logger.log({f"pred_{split}/model_outputs": pred_table})
         self.logger.save(str(combined_file.absolute()), policy="now")
