@@ -67,6 +67,7 @@ def add_python_paths(script):
         "export PYTHONPATH=$HOME/.local/lib/python3.9/site-packages/:$PYTHONPATH\n"
     )
     script += "\n\n#pip install --user -r src/requirements.txt\n"
+    script += "\n\npip install --user diff-match-patch\n"
     return script
 
 
