@@ -601,8 +601,9 @@ class Seq2SeqRuntime(Runtime):
             logger.info("Loading last checkpoint...")
             self._load_last_checkpoint(trainer)
 
-        stage = ExperimentStage.from_split(split)
-        dataset = self.dl_factory.get_dataset(stage=stage)
+        stage = ExperimentStage.PREDICTION
+        ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(split))
+        dataset = self.dl_factory.get_dataset(stage=stage, path=ds_path)
         if dataset is None:
             logger.error(f"No dataset found for split = {split}")
             return

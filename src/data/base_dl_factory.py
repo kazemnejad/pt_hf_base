@@ -1,7 +1,7 @@
 import abc
 import logging
 from pathlib import Path
-from typing import Union, Any, Callable, Optional, Dict, List
+from typing import Union, Any, Callable, Optional, Dict, List, Tuple
 
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
@@ -57,7 +57,7 @@ class DataLoaderFactory(Registrable):
         self.shuffle = shuffle
         self.dataloader = dataloader or Lazy(DIDataloader)
 
-        self._ds_cache: Dict[str, Any] = {}
+        self._ds_cache: Dict[Tuple[str, str], Any] = {}
 
         self.tokenizer = None
 
@@ -129,31 +129,24 @@ class DataLoaderFactory(Registrable):
         stage: Optional[ExperimentStage] = None,
         path: Optional[str] = None,
         force_rebuild: bool = False,
-    ) -> DatasetType:
+    ) -> Optional[DatasetType]:
         assert stage is not None or path is None
 
         if path is None:
-            ds_path = self.dataset_dir
-            if stage == ExperimentStage.TRAINING:
-                ds_path /= self.train_filename
-            elif stage == ExperimentStage.VALIDATION:
-                ds_path /= self.validation_filename
-            elif stage == ExperimentStage.TEST:
-                ds_path /= self.test_filename
-            else:
-                raise ValueError(f"Unsupported stage = {stage}")
+            ds_path = Path(self.get_ds_file_path(stage=stage))
         else:
             ds_path = Path(path)
 
-        if str(ds_path) in self._ds_cache and not force_rebuild:
-            return self._ds_cache[str(ds_path)]
+        cache_key = (str(stage), str(ds_path))
+        if cache_key in self._ds_cache and not force_rebuild:
+            return self._ds_cache[cache_key]
 
         if not ds_path.exists():
             logger.warning(f"The dataset at {ds_path} doesn't exist. Skipping ...")
             return None
 
         ds = self.build_dataset(ds_path, stage)
-        self._ds_cache[str(ds_path)] = ds
+        self._ds_cache[cache_key] = ds
 
         return ds
 
