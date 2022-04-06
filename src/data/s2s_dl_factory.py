@@ -27,8 +27,6 @@ from tokenization_utils import SpecialTokens, Tokenizer
 
 logger = logging.getLogger("app")
 
-DEFAULT_EOS_TOKEN = "</s>"
-
 
 @DataLoaderFactory.register("seq2seq", exist_ok=True)
 class Seq2SeqDataLoaderFactory(DataLoaderFactory):
