@@ -407,6 +407,13 @@ class Seq2SeqRuntime(Runtime):
         training_args = Seq2SeqTrainingArguments(**training_args)
 
         data_collator = self.dl_factory.get_collate_fn(stage)
+        if stage == ExperimentStage.TRAINING:
+            eval_data_collator = self.dl_factory.get_collate_fn(
+                ExperimentStage.VALIDATION
+            )
+        else:
+            eval_data_collator = None
+
         try:
             data_collator.model = model
         except Exception as exp:
@@ -420,6 +427,7 @@ class Seq2SeqRuntime(Runtime):
             callbacks=[CustomWandbCallback()],
             **kwargs,
         )
+        trainer.eval_data_collator = eval_data_collator
 
         return trainer
 

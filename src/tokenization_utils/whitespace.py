@@ -1,6 +1,8 @@
+import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
+import jsonlines
 from tokenizers import Tokenizer as HfTokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import WhitespaceSplit
@@ -13,9 +15,15 @@ from data.base_dl_factory import DataLoaderFactory
 from tokenization_utils import SpecialTokens
 from tokenization_utils.base_tokenizer import Tokenizer
 
-import logging
-
 logger = logging.getLogger("app")
+
+
+def read_jsonlines(path):
+    with jsonlines.open(path, "r") as reader:
+        for obj in reader:
+            yield obj["source"]
+            yield obj["target"]
+
 
 class WhitespaceTokenizer(PreTrainedTokenizerFast, Tokenizer):
     @classmethod
@@ -47,9 +55,16 @@ class WhitespaceTokenizer(PreTrainedTokenizerFast, Tokenizer):
                 show_progress=True,
                 special_tokens=list(special_tokens),
             )
-            tokenizer.train(
-                [dataset.get_ds_file_path(ExperimentStage.TRAINING)], trainer
-            )
+            train_file_path = dataset.get_ds_file_path(ExperimentStage.TRAINING)
+            if train_file_path.endswith(".jsonl"):
+                tokenizer.train_from_iterator(
+                    read_jsonlines(dataset.get_ds_file_path(ExperimentStage.TRAINING)),
+                    trainer,
+                )
+            else:
+                tokenizer.train(
+                    [dataset.get_ds_file_path(ExperimentStage.TRAINING)], trainer
+                )
             tokenizer.post_processor = TemplateProcessing(
                 single=f"$A {SpecialTokens.END}",
                 special_tokens=[
@@ -66,6 +81,9 @@ class WhitespaceTokenizer(PreTrainedTokenizerFast, Tokenizer):
             unk_token=SpecialTokens.UNK,
             pad_token=SpecialTokens.PAD,
         )
+
+        logger.info("Finished building tokenizer!")
+        logger.info(tokenizer.__repr__())
 
         return tokenizer
 

@@ -1,5 +1,5 @@
 {
-    trainer: {
+    trainer+: {
         evaluation_strategy: 'steps',
         logging_strategy: 'steps',
         save_strategy: 'steps',

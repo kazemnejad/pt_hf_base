@@ -6,6 +6,7 @@
     <envs>
       <env name="PYTHONUNBUFFERED" value="1" />
       <env name="APP_SEED" value="200" />
+      <env name="APP_DS_SPLIT" value="simple" />
     </envs>
     <option name="SDK_HOME" value="/usr/local/miniconda3/envs/comp-gen_v2/bin/python" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />

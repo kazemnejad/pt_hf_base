@@ -281,6 +281,8 @@ def main(args: argparse.Namespace):
         save_code=False,
         settings=settings,
         job_type=job_type,
+        id=args.idx,
+        resume="allow"
     )
 
     run_id = run.id
@@ -307,7 +309,6 @@ def main(args: argparse.Namespace):
     artifact_name = f"bundle-{run_id}"
     artifact = wandb.Artifact(name=artifact_name, type="code")
     artifact.add_dir("configs", "configs/")
-    # artifact.add_dir("src", "src/")
     add_source_code(artifact)
     artifact.add_dir("scripts", "scripts/")
     artifact.add_file(str(run_script_path), "run.sh")
@@ -324,7 +325,6 @@ def main(args: argparse.Namespace):
         data_art_name = args.dataset
         if ":" not in data_art_name:
             data_art_name += ":latest"
-        # api = wandb.Api(overrides={"project": project})
         run.use_artifact(data_art_name)
 
     run.finish()
@@ -336,6 +336,13 @@ def main(args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Make Experiment Bundle")
+
+    if os.path.exists("configs/project_name.json"):
+        with open("configs/project_name.json") as f:
+            import json
+            default_proj_name = json.load(f)["project_name"]
+    else:
+        default_proj_name = None
 
     parser.add_argument(
         "-s",
@@ -362,7 +369,7 @@ if __name__ == "__main__":
         "--project",
         metavar="project",
         type=str,
-        default="comp-gen_v2",
+        default=default_proj_name,
         help="Wandb project",
     )
 
@@ -394,6 +401,14 @@ if __name__ == "__main__":
         metavar="NAME",
         type=str,
         help="Name postfix",
+    )
+
+    parser.add_argument(
+        "-i",
+        "--idx",
+        metavar="IDX",
+        type=str,
+        help="Experiment Idx",
     )
 
     args = parser.parse_args()
