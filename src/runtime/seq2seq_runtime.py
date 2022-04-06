@@ -34,7 +34,7 @@ from analyzers import Analyzer
 from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
-from modules import BaseTrainer
+from trainers import BaseTrainer
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
 

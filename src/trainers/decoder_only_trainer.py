@@ -8,8 +8,8 @@ from transformers import IntervalStrategy, is_datasets_available
 from transformers.deepspeed import is_deepspeed_zero3_enabled
 from transformers.trainer_pt_utils import IterableDatasetShard
 
-from modules.base_trainer import BaseTrainer
-from modules.trainer_with_metrics import Seq2SeqTrainerWithMetrics
+from trainers.base_trainer import BaseTrainer
+from trainers.trainer_with_metrics import Seq2SeqTrainerWithMetrics
 
 @BaseTrainer.register("decoder_only")
 class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):

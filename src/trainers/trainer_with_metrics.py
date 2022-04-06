@@ -4,7 +4,7 @@ import torch
 from transformers import EvalPrediction, IntervalStrategy
 from transformers.trainer_pt_utils import nested_numpify
 
-from modules.base_trainer import BaseTrainer
+from trainers.base_trainer import BaseTrainer
 
 
 @BaseTrainer.register("seq2seq_trainer_with_metrics")
