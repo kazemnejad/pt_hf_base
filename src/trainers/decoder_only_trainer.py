@@ -204,6 +204,10 @@ class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
             raise ValueError("Trainer: evaluation requires an eval_dataset.")
         eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
 
+        data_collator = self.data_collator
+        if getattr(self, "eval_data_collator", None) is not None:
+            data_collator = self.eval_data_collator
+
         if is_datasets_available() and isinstance(eval_dataset, datasets.Dataset):
             eval_dataset = self._remove_unused_columns(
                 eval_dataset, description="evaluation"
@@ -221,16 +225,12 @@ class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
             return DataLoader(
                 eval_dataset,
                 batch_size=self.args.eval_batch_size,
-                collate_fn=self.data_collator,
+                collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
             )
 
         eval_sampler = self._get_eval_sampler(eval_dataset)
-
-        data_collator = self.data_collator
-        if getattr(self, "eval_data_collator", None) is not None:
-            data_collator = self.eval_data_collator
 
         return DataLoader(
             eval_dataset,
