@@ -67,7 +67,6 @@ def add_python_paths(script):
         "export PYTHONPATH=$HOME/.local/lib/python3.9/site-packages/:$PYTHONPATH\n"
     )
     script += "\n\n#pip install --user -r src/requirements.txt\n"
-    script += "\n\npip install --user diff-match-patch\n"
     return script
 
 
@@ -312,6 +311,12 @@ def main(args: argparse.Namespace):
     artifact.add_dir("configs", "configs/")
     add_source_code(artifact)
     artifact.add_dir("scripts", "scripts/")
+
+    if os.path.exists(".run"):
+        artifact.add_dir(".run", ".run/")
+    if os.path.exists(".vscode"):
+        artifact.add_dir(".vscode", ".vscode/")
+
     artifact.add_file(str(run_script_path), "run.sh")
     artifact.add_file(str(metadata_path), "metadata.json")
     if job_script_path is not None:

@@ -33,6 +33,10 @@ Subsystem       sftp    $CONDA_PREFIX/libexec/sftp-server
 AuthorizedKeysFile	.ssh/authorized_keys
 EOF
 
+cat >$HOME/.profile <<EOF
+export LD_LIBRARY_PATH=/.singularity.d/libs
+EOF
+
 chmod 600 $SSHDIR/*
 chmod 644 $SSHDIR/sshd_config
 chown -R $USER $SSHDIR

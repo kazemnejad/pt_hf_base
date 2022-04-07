@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+        "args": [
+            "--debug_mode",
+            "--configs",
+            "configs/t5a_debug.jsonnet,configs/data/scan.jsonnet",
+            "train",
+            "--eval_split",
+            "valid"
+        ],
+        "env": {
+            "APP_DS_SPLIT": "simple",
+            "APP_DIRECTORY": "experiments",
+            "APP_SEED": "1"
+          //            "APP_EXPERIMENT_NAME": "experiments",
+          //            "APP_CL_NUM_PROC": "2"
+        },
+        "name": "Train",
+        "type": "python",
+        "request": "launch",
+        "program": "src/main.py",
+        "console": "integratedTerminal"
+    },
+
+
+    {
+      "name": "Python: Current File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal"
+    }
+  ]
+}
