@@ -67,6 +67,7 @@ rsync -avz $HOME/.config {node_storage}/home/
 rsync -avz $HOME/.codalab {node_storage}/home/
 rsync -avz $HOME/.comet.config {node_storage}/home/
 rsync -avz $HOME/.netrc {node_storage}/home/
+rsync -avz $HOME/.ssh {node_storage}/home/
 """
 
 PARTIAL_RUN_TENSORBOARD_DEV = """
@@ -115,7 +116,6 @@ PARTIAL_UPLOAD_RESULT_TO_CL = """
 PARTIAL_CLEAN_UP = """
 echo "---> 8. Cleaning up!"
 rm -r {tmp_dir}
-kill $TB_PID || true
 """
 
 
@@ -595,7 +595,7 @@ def download_bundle(exp_key: str, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     import wandb
-    api = wandb.Api(overrides={"project": "comp-gen_v2"})
+    api = wandb.Api(overrides={"project": os.environ.get("WANDB_PROJECT", "comp-gen_v2")})
 
     artifact_name = f"bundle-{exp_key}:latest"
     artifact = api.artifact(artifact_name)

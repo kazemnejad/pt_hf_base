@@ -553,7 +553,7 @@ class Seq2SeqRuntime(Runtime):
         logger.info(f"*** Evaluate on {split} ***")
         torch.cuda.empty_cache()
 
-        stage = ExperimentStage.from_split(split)
+        stage = ExperimentStage.PREDICTION
 
         trainer = self.create_trainer(stage)
         if load_best:
@@ -566,7 +566,11 @@ class Seq2SeqRuntime(Runtime):
             logger.info("Loading last checkpoint...")
             self._load_last_checkpoint(trainer)
 
-        dataset = self.dl_factory.get_dataset(stage=stage)
+        ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(split))
+        dataset = self.dl_factory.get_dataset(stage=stage, path=ds_path)
+        if dataset is None:
+            logger.error(f"No dataset found for split = {split}")
+            return
 
         if dataset is None:
             logger.error(f"No dataset found for split = {split}")
@@ -765,7 +769,7 @@ class Seq2SeqRuntime(Runtime):
         logger.info(f"Using {analyzer.__class__.__name__}...")
         analyzer.analyze()
 
-    def analyze_all(self, load_best: bool = True):
+    def analyze_all(self, load_best: bool = True, split: str = "test"):
         if self.analyzers is None:
             logger.warning("self.analyzers is None. Exiting...")
             return
@@ -796,6 +800,7 @@ class Seq2SeqRuntime(Runtime):
                 num_beams=trainer.args.generation_num_beams,
                 max_length=trainer.args.generation_max_length,
                 exp_root=self.exp_root,
+                split=split
             )
 
             logger.info(f"Using {analyzer.__class__.__name__}...")
