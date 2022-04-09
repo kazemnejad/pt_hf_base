@@ -595,9 +595,15 @@ def download_bundle(exp_key: str, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     import wandb
-    api = wandb.Api(overrides={"project": os.environ.get("WANDB_PROJECT", "comp-gen_v2")})
+    project = os.environ.get("WANDB_PROJECT", "comp-gen_v2")
+    user = os.environ.get("WANDB_USER", None)
+    api = wandb.Api(overrides={"project": project})
+    if user is not None:
+        artifact_name = f"{user}/{project}/"
+    else:
+        artifact_name = ""
 
-    artifact_name = f"bundle-{exp_key}:latest"
+    artifact_name += f"bundle-{exp_key}:latest"
     artifact = api.artifact(artifact_name)
     artifact.download(str(output_dir))
 

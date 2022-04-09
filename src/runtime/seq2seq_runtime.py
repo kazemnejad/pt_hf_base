@@ -34,9 +34,9 @@ from analyzers import Analyzer
 from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
-from trainers import BaseTrainer
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
+from trainers import BaseTrainer
 
 transformers.logging.set_verbosity_info()
 
@@ -800,11 +800,50 @@ class Seq2SeqRuntime(Runtime):
                 num_beams=trainer.args.generation_num_beams,
                 max_length=trainer.args.generation_max_length,
                 exp_root=self.exp_root,
-                split=split
+                split=split,
             )
 
             logger.info(f"Using {analyzer.__class__.__name__}...")
             analyzer.analyze()
+
+    def get_loaded_trainer(
+        self, load_best: bool = False, checkpoint_name: str = None
+    ) -> Seq2SeqTrainer:
+        if "load_best_model_at_end" in self.training_args:
+            self.training_args.pop("load_best_model_at_end")
+
+        trainer = self.create_trainer(ExperimentStage.PREDICTION)
+
+        if checkpoint_name:
+            ckpt_dir = self.exp_root / "checkpoints" / checkpoint_name
+            if ckpt_dir.exists():
+                logger.info(f"Loading checkpoints from {ckpt_dir}")
+                state_dict = torch.load(ckpt_dir / WEIGHTS_NAME, map_location="cpu")
+                trainer._load_state_dict_in_model(state_dict)
+        if load_best:
+            try:
+                self._load_best_checkpoint(trainer)
+            except:
+                logger.info(
+                    "Failed to load best checkpoint, Loading last checkpoint..."
+                )
+                self._load_last_checkpoint(trainer)
+        else:
+            logger.info("Loading last checkpoint...")
+            self._load_last_checkpoint(trainer)
+
+        return trainer
+
+    def console_inference(self, load_best: bool = False, ckpt_name: str = None):
+        torch.cuda.empty_cache()
+        trainer = self.get_loaded_trainer(
+            load_best=load_best, checkpoint_name=ckpt_name
+        )
+
+        from runtime.model_inference_shell import ModelInferenceShell
+
+        shell = ModelInferenceShell(self, trainer)
+        shell.cmdloop()
 
     def hp_tune(self, eval_split: str = "valid"):
         logger.info(f"*** Hyperparameter Tuning (on split: {eval_split}) ***")

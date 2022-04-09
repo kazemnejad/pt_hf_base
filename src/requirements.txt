@@ -16,3 +16,4 @@ pydot==1.4.2
 scipy==1.8.0
 jsonlines==3.0.0
 diff-match-patch==20200713
+ecco==0.1.2
