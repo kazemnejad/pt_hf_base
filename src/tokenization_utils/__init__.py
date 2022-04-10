@@ -14,3 +14,4 @@ class SpecialTokens:
 from .base_tokenizer import Tokenizer
 from .pre_trained import DIPreTrainedTokenizer
 from .whitespace import WhitespaceTokenizer
+from .manual import ManualWhitespaceTokenizer
