@@ -64,7 +64,12 @@ class DataLoaderFactory(Registrable):
     def set_tokenizer(self, tokenizer):
         self.tokenizer = tokenizer
 
-    def get_ds_file_path(self, stage: ExperimentStage = None, path: str = None) -> str:
+    def get_ds_file_path(
+        self,
+        stage: ExperimentStage = None,
+        path: str = None,
+        no_exception: bool = False,
+    ) -> str:
         if path is None:
             file_path = self.dataset_dir
             if stage == ExperimentStage.TRAINING:
@@ -74,7 +79,7 @@ class DataLoaderFactory(Registrable):
             elif stage == ExperimentStage.TEST:
                 file_path /= self.test_filename
 
-            if not file_path.exists():
+            if not no_exception and not file_path.exists():
                 raise ValueError(f"Path {file_path} does not exist")
 
             return str(file_path)
@@ -133,7 +138,7 @@ class DataLoaderFactory(Registrable):
         assert stage is not None or path is None
 
         if path is None:
-            ds_path = Path(self.get_ds_file_path(stage=stage))
+            ds_path = Path(self.get_ds_file_path(stage=stage, no_exception=True))
         else:
             ds_path = Path(path)
 
