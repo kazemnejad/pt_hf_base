@@ -631,7 +631,11 @@ class Seq2SeqRuntime(Runtime):
             output_test_preds_file = self.exp_root / f"pred_out_{split}.jsonl"
             with output_test_preds_file.open("w") as writer:
                 all_objs = []
-                for batch_preds in chunks(preds, 128):
+                for batch_preds in tqdm(
+                    chunks(preds, 128),
+                    total=len(preds) // 128,
+                    desc="Decoding predictions",
+                ):
                     pred_texts = self.tokenizer.batch_decode(
                         batch_preds,
                         skip_special_tokens=True,
