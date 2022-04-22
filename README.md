@@ -1,4 +1,4 @@
-# Base deep learning codebase for Huggingface projects
+# Research codebase for Huggingface-based projects
 
 ## Features
 - Dependency injection using Jsonnet files
