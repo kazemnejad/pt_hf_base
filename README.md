@@ -6,6 +6,7 @@
 - Logging
 - Mila/Slurm support
 - HP tune
+- Designed with reproducibility in mind
 
 ## Supported Models
 - Encoder-Decoder (T5)
