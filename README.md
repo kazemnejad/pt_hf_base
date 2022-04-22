@@ -2,7 +2,7 @@
 
 ## Features
 - Dependency injection using Jsonnet files
-- Wandb
+- Wandb integration
 - Logging
 - Mila/Slurm support
 - HP tune
@@ -16,16 +16,33 @@
 - Sequence to Sequence prediction
 
 ## How to use
-**Train**
+Example usage involving **training**, **prediction**, **analysis**, **multiple seed**
 ```shell
-python src/main.py --configs "configs/t5a_debug.jsonnet" train
-```
-**Prediction**
-```shell
-python src/main.py --configs "configs/t5a_debug.jsonnet" predict
-```
+#!/bin/bash
 
-**Analyze**
-```shell
-python src/main.py --configs "configs/t5a_debug.jsonnet" analyze_all
+export APP_DS_SPLIT=simple
+export WANDB_RUN_GROUP=example_exp
+
+for SEED in `seq 1 3`; do
+	export APP_DIRECTORY=experiments/example_exp
+	export APP_EXPERIMENT_NAME=seed_$SEED
+	export APP_SEED=$SEED
+	export WANDB_JOB_TYPE=exp
+	export WANDB_RUN_ID=random_id_seed_$SEED
+
+	python src/main.py --configs 'configs/t5a_debug.jsonnet,configs/data/scan.jsonnet' \
+	       train
+
+	python src/main.py --configs 'configs/t5a_debug.jsonnet,configs/data/scan.jsonnet' \
+	       predict --split test
+
+	python src/main.py --configs 'configs/t5a_debug.jsonnet,configs/data/scan.jsonnet' \
+	       combine_pred --split test
+
+	python src/main.py --configs 'configs/t5a_debug.jsonnet,configs/data/scan.jsonnet' \
+	       analyze_all
+
+done
+
+echo "Experiment finished!"
 ```
