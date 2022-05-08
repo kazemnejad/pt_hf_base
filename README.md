@@ -234,3 +234,23 @@ python src/main.py \
 ```
 ### Dependency Injection
 In this codebase, we use AllenNLP's dependency injection framework. Learn more at https://guide.allennlp.org/using-config-files
+
+## Replicate Positional Encoding results 
+Upload and run the following experiments:
+```shell
+export SPLIT=length_25 DS=scan && python scripts/upload_experiment.py \
+    --configs "configs/cust_t5_dec_only_x2.jsonnet,configs/models/pe_none.jsonnet,configs/data/scan.jsonnet" \
+    -c "train --eval_split test,predict,combine_pred" \
+    -d "data-$DS-$SPLIT" \
+    -e "APP_DS_SPLIT=$SPLIT"\
+    --seeds 3
+```
+Change `configs/models/pe_txl.jsonnet` to 
+- `configs/models/pe_txl.jsonnet`
+- `configs/models/pe_abs_lrnd.jsonnet`
+- `configs/models/pe_abs_sin.jsonnet`
+- `configs/models/pe_alibi.jsonnet`
+- `configs/models/pe_alibi_lrnd.jsonnet`
+- `configs/models/pe_rotary.jsonnet`
+- `configs/models/pe_t5.jsonnet`
+To create different experiments.
