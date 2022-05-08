@@ -320,6 +320,9 @@ class Seq2SeqRuntime(Runtime):
                     mode = "offline"
                 else:
                     mode = "online"
+
+                wandb_entity = self.global_vars.get("wandb_entity", None)
+
                 settings = wandb.Settings()
                 settings.update(
                     _save_requirements=True,
@@ -333,6 +336,7 @@ class Seq2SeqRuntime(Runtime):
                     resume="allow",
                     mode=mode,
                     force=True,
+                    entity=wandb_entity,
                 )
 
             self._logger = wandb.run

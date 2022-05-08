@@ -46,3 +46,5 @@ done
 
 echo "Experiment finished!"
 ```
+
+## Code structure
