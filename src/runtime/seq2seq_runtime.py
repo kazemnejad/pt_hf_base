@@ -552,6 +552,8 @@ class Seq2SeqRuntime(Runtime):
     def evaluate(self, split: str = "test", load_best: bool = True):
         logger.info(f"*** Evaluate on {split} ***")
         torch.cuda.empty_cache()
+        if "load_best_model_at_end" in self.training_args:
+            self.training_args.pop("load_best_model_at_end")
 
         stage = ExperimentStage.PREDICTION
 
