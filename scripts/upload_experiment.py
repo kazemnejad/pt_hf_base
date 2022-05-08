@@ -234,6 +234,7 @@ def add_source_code(art):
 
 def main(args: argparse.Namespace):
     project: str = args.project
+    entity: str = args.entity
     configs: str = args.configs
 
     print("# ----> 1. Generating a unique experiment name...")
@@ -272,6 +273,7 @@ def main(args: argparse.Namespace):
     )
     run = wandb.init(
         project=project,
+        entity=entity,
         dir=dir_dir,
         group=group,
         name=exp_name,
@@ -350,6 +352,13 @@ if __name__ == "__main__":
     else:
         default_proj_name = None
 
+    if os.path.exists("configs/entity_name.json"):
+        with open("configs/entity_name.json") as f:
+            import json
+            default_entity_name = json.load(f)["entity_name"]
+    else:
+        default_entity_name = None
+
     parser.add_argument(
         "-s",
         "--configs",
@@ -377,6 +386,14 @@ if __name__ == "__main__":
         type=str,
         default=default_proj_name,
         help="Wandb project",
+    )
+
+    parser.add_argument(
+        "--entity",
+        metavar="entity",
+        type=str,
+        default=default_entity_name,
+        help="Wandb entity",
     )
 
     parser.add_argument(
