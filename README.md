@@ -49,6 +49,7 @@ echo "Experiment finished!"
 ```
 ### Setup for development
 #### Local machine
+Install dependencies:
 ```shell
 conda create -n hf_proj python=3.9
 conda activate hf_proj
@@ -138,6 +139,7 @@ It will create and upload the experiment bundle for you on wandb
 and returns its unique id.
 
 ## Code structure
+### Overview
 - `configs/`: Directory to store experiment configurations, all in .jsonnet format.
 - `data/`: Datasets are store here in the following format (not present in the Git):
 ```
@@ -160,7 +162,15 @@ and returns its unique id.
   - `tokenization_utils`: Different classes of tokenizers.
   - `trainer/`: Sub-classes of Huggingface trainers with added functionalities.
 
-### Add a new model
+Usage of `src/main.py`:
+```shell
+python src/main.py \
+	--debug_mode \ # optional
+	--configs "path/to/config1.jsonnet,path/to/config2.jsonnet" \
+	<command> --command_arg1 val1 --command_arg2 val2
+```
+
+### Adding a new model
 1. Create its class under `src/models/`
 ```python
 from models.base_model import Model, HfModelConfig
@@ -222,4 +232,5 @@ python src/main.py \
     --configs 'configs/<my_other_config1>,...,configs/models/gpt_neo_base.jsonnet' \
     train
 ```
-
+### Dependency Injection
+In this codebase, we use AllenNLP's dependency injection framework. Learn more at https://guide.allennlp.org/using-config-files
