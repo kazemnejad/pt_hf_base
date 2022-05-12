@@ -368,7 +368,6 @@ class Seq2SeqRuntime(Runtime):
             model_class,
             params=Params(lazy_model),
             tokenizer=self.tokenizer,
-            cache_dir=self.cache_dir,
         )
 
         has_handled_tokenizer = False
@@ -382,7 +381,7 @@ class Seq2SeqRuntime(Runtime):
                 _ = model_kwargs.pop("tokenizer")
 
             logger.info(f"Loading initial model weights from {arg}...")
-            model = model_class.from_pretrained(arg, **model_kwargs)
+            model = model_class.from_pretrained(arg, **model_kwargs, cache_dir=str(self.cache_dir))
         else:
             model = model_constructor(**model_kwargs)
             has_handled_tokenizer = True

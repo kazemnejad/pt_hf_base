@@ -42,7 +42,6 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
             model_class,
             params=Params(lazy_model),
             tokenizer=self.tokenizer,
-            cache_dir=self.cache_dir,
             label2id=self.dl_factory.label2id,
             id2label=self.dl_factory.id2label,
             problem_type=self.dl_factory.get_problem_type(),
@@ -59,7 +58,7 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                 _ = model_kwargs.pop("tokenizer")
 
             logger.info(f"Loading initial model weights from {arg}...")
-            model = model_class.from_pretrained(arg, **model_kwargs)
+            model = model_class.from_pretrained(arg, **model_kwargs, cache_dir=str(self.cache_dir))
         else:
             model = model_constructor(**model_kwargs)
             has_handled_tokenizer = True
