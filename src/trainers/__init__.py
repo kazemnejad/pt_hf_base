@@ -1,3 +1,3 @@
 from .base_trainer import BaseTrainer
 from .decoder_only_trainer import DecoderOnlyTrainer
-from .trainer_with_metrics import Seq2SeqTrainerWithMetrics
+from .trainer_with_metrics import Seq2SeqTrainerWithMetrics, TrainerWithMetrics

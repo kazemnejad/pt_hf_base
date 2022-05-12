@@ -129,6 +129,19 @@ class DataLoaderFactory(Registrable):
     ) -> DatasetType:
         raise NotImplementedError()
 
+    @property
+    def label2id(self) -> Optional[Dict[str, int]]:
+        return None
+
+    @property
+    def id2label(self) -> Optional[Dict[int, str]]:
+        if self.label2id is not None:
+            return {idx: lbl for lbl, idx in self.label2id.items()}
+        return None
+
+    def get_problem_type(self) -> Optional[str]:
+        return None
+
     def get_dataset(
         self,
         stage: Optional[ExperimentStage] = None,

@@ -94,10 +94,18 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
             self.tokenizer.pad_token = self.tokenizer.convert_ids_to_tokens(0)
 
         if self.is_decoder_only:
-            logger.info("Appending input_output separator token...")
-            self.tokenizer.add_tokens(
-                AddedToken(self.decoder_only_input_output_sep_token, single_word=False)
-            )
+            if (
+                tokenizer.convert_tokens_to_ids(
+                    self.decoder_only_input_output_sep_token
+                )
+                == tokenizer.unk_token_id
+            ):
+                logger.info("Appending input_output separator token...")
+                self.tokenizer.add_tokens(
+                    AddedToken(
+                        self.decoder_only_input_output_sep_token, single_word=False
+                    )
+                )
             self.tokenizer.padding_side = "left"
 
         add_vocab = self.append_vocab in ["all", "src", "tgt"]
@@ -431,7 +439,7 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
                     label_pad_token_id=-100,
                     padding="longest",
                     padding_side=self.decoder_only_padding_side,
-                    include_position_ids=self.decoder_only_include_position_ids
+                    include_position_ids=self.decoder_only_include_position_ids,
                 )
             else:
                 collator = DataCollatorForSeq2SeqInCausalLMInEvaluation(
@@ -700,7 +708,7 @@ if __name__ == "__main__":
                 "decoder_only_block_size": 128,
                 "decoder_only_mask_inputs": True,
                 "decoder_only_padding_side": "right",
-                "decoder_only_include_position_ids": True
+                "decoder_only_include_position_ids": True,
             }
         )
     )

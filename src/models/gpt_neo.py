@@ -1,8 +1,9 @@
 import logging
-from typing import Optional
+from typing import Optional, Dict
 
 from transformers import (
     GPTNeoConfig,
+    GPTNeoForSequenceClassification,
 )
 from transformers import GPTNeoForCausalLM
 
@@ -36,6 +37,47 @@ class CausalGPTNeo(GPTNeoForCausalLM, Model):
 
         self.config.eos_token_id = tokenizer.eos_token_id
         self.config.bos_token_id = self.config.eos_token_id
+        self.config.pad_token_id = tokenizer.pad_token_id
+
+        if (
+            len(tokenizer) > self.transformer.wte.num_embeddings
+            or len(tokenizer) < self.config.vocab_size
+        ):
+            logger.info(
+                f"Resizing num_embeddings to {len(tokenizer)} (Previously, {self.transformer.wte.num_embeddings})"
+            )
+            self.resize_token_embeddings(len(tokenizer))
+
+
+@Model.register("gpt_neo_seq_classifier")
+class SeqClassifierGPTNeo(GPTNeoForSequenceClassification, Model):
+    def __init__(
+        self,
+        config: Optional[HfModelConfig] = None,
+        tokenizer: Optional[Tokenizer] = None,
+        problem_type: Optional[str] = "single_label_classification",
+        label2id: Optional[Dict[str, int]] = None,
+        **kwargs,
+    ):
+        assert config is not None
+
+        if problem_type is not None:
+            config.problem_type = problem_type
+        if label2id is not None:
+            config.label2id = label2id
+            config.id2label = {idx: lbl for lbl, idx in label2id.items()}
+
+        super().__init__(config)
+
+        self.handle_tokenizer(tokenizer)
+
+    def handle_tokenizer(self, tokenizer: Optional[Tokenizer] = None):
+        if tokenizer is None:
+            return
+
+        self.config.eos_token_id = tokenizer.eos_token_id
+        self.config.bos_token_id = self.config.eos_token_id
+        self.config.pad_token_id = tokenizer.pad_token_id
 
         if (
             len(tokenizer) > self.transformer.wte.num_embeddings
