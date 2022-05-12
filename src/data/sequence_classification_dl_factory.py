@@ -145,10 +145,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
             input_ids = [tid for tid in examples["input_ids"][idx] if tid >= 0]
             labels = examples["labels"][idx]
 
-            if self.source_seq_key in examples:
-                src = [examples[key][idx] for key in input_keys]
-            else:
-                src = ""
+            src = [examples[key][idx] for key in input_keys]
 
             decoded_input_ids = self.tokenizer.decode(input_ids)
             decoded_input_ids = decoded_input_ids.replace("\n", "\\n")
