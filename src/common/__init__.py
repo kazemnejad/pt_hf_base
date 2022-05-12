@@ -24,6 +24,7 @@ class ExperimentStage(Enum):
     def from_split(split: str) -> "ExperimentStage":
         stage = {
             "valid": ExperimentStage.VALIDATION,
+            "validation": ExperimentStage.VALIDATION,
             "test": ExperimentStage.TEST,
             "train": ExperimentStage.TRAINING,
             "predict": ExperimentStage.PREDICTION,
