@@ -29,7 +29,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         input_prompt: Optional[str] = None,
         label_list: Optional[List[str]] = None,
         is_regression: Optional[bool] = False,
-        decoder_only_cls_token: Optional[str] = "\n",
+        decoder_only_cls_token: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
