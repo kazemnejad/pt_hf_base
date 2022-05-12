@@ -48,7 +48,7 @@ def main(args: argparse.Namespace):
         [os.path.splitext(os.path.basename(p))[0] for p in config_files]
     )
     subprocess.check_call(
-        shlex.split(f"wandb sweep -p {project} --name {sweep_name} {yaml_path}")
+        shlex.split(f"wandb sweep -e {args.entity} -p {project} --name {sweep_name} {yaml_path}")
     )
 
 
