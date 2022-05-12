@@ -95,43 +95,49 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
             logger.error(f"No dataset found for split = {split}")
             return
 
-        test_results = trainer.predict(dataset, metric_key_prefix=f"pred_{split}")
+        if not isinstance(dataset, dict):
+            dataset_dict = {split: dataset}
+        else:
+            dataset_dict = dataset
 
-        metrics = test_results.metrics
-        metrics[f"pred_{split}_num_samples"] = len(dataset)
-        self.log_metrics_to_console(f"pred_{split}", metrics)
-        trainer.save_metrics(f"pred_{split}", metrics)
-        trainer.log(metrics)
+        for split, dataset in dataset_dict.items():
+            test_results = trainer.predict(dataset, metric_key_prefix=f"pred_{split}")
 
-        if trainer.is_world_process_zero():
-            preds = test_results.predictions
-            if isinstance(test_results.predictions, tuple):
-                preds = preds[0]
+            metrics = test_results.metrics
+            metrics[f"pred_{split}_num_samples"] = len(dataset)
+            self.log_metrics_to_console(f"pred_{split}", metrics)
+            trainer.save_metrics(f"pred_{split}", metrics)
+            trainer.log(metrics)
 
-            is_regression = self.dl_factory.get_problem_type() == "regression"
-            preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
+            if trainer.is_world_process_zero():
+                preds = test_results.predictions
+                if isinstance(test_results.predictions, tuple):
+                    preds = preds[0]
 
-            output_test_preds_file = self.exp_root / f"pred_out_{split}.jsonl"
-            with output_test_preds_file.open("w") as writer:
-                all_objs = []
-                for batch_preds in tqdm(
-                    chunks(preds, 128),
-                    total=len(preds) // 128,
-                    desc="Decoding predictions",
-                ):
-                    pred_texts = [
-                        p if is_regression else self.dl_factory.id2label[p]
-                        for p in batch_preds
-                    ]
+                is_regression = self.dl_factory.get_problem_type() == "regression"
+                preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
 
-                    for pt in pred_texts:
-                        all_objs.append({"prediction": pt})
+                output_test_preds_file = self.exp_root / f"pred_out_{split}.jsonl"
+                with output_test_preds_file.open("w") as writer:
+                    all_objs = []
+                    for batch_preds in tqdm(
+                        chunks(preds, 128),
+                        total=len(preds) // 128,
+                        desc="Decoding predictions",
+                    ):
+                        pred_texts = [
+                            p if is_regression else self.dl_factory.id2label[p]
+                            for p in batch_preds
+                        ]
 
-                import jsonlines
+                        for pt in pred_texts:
+                            all_objs.append({"prediction": pt})
 
-                jsonlines.Writer(writer).write_all(all_objs)
+                    import jsonlines
 
-            self.logger.save(str(output_test_preds_file.absolute()), policy="now")
+                    jsonlines.Writer(writer).write_all(all_objs)
+
+                self.logger.save(str(output_test_preds_file.absolute()), policy="now")
 
     def combine_pred(self, split: str = "test"):
         logger.info(f"*** Combing predictions on split: {split} ***")
@@ -150,46 +156,53 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                 lines_out.append(obj)
 
         input_ds = self.dl_factory.get_dataset(stage)
-        assert len(input_ds) == len(lines_out)
 
-        pred_table = wandb.Table(
-            columns=["idx", "input", "gold", "prediction", "is_correct", "diff"]
-        )
-        combined_file = self.exp_root / f"pred_combined_{split}.jsonl"
+        if not isinstance(input_ds, dict):
+            input_ds_dict = {split: input_ds}
+        else:
+            input_ds_dict = input_ds
 
-        is_regression = self.dl_factory.get_problem_type() == "regression"
+        for split, input_ds in input_ds_dict.items():
+            assert len(input_ds) == len(lines_out)
 
-        with jsonlines.open(str(combined_file), mode="w") as writer:
-            for (obj_ds, obj_pred) in tqdm(zip(input_ds, lines_out)):
-                prompt = self.tokenizer.decode(
-                    obj_ds["input_ids"],
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=False,
-                )
-                labels = obj_ds["labels"]
-                target = self.tokenizer.decode(
-                    labels, skip_special_tokens=True, clean_up_tokenization_spaces=False
-                )
+            pred_table = wandb.Table(
+                columns=["idx", "input", "gold", "prediction", "is_correct", "diff"]
+            )
+            combined_file = self.exp_root / f"pred_combined_{split}.jsonl"
 
-                idx = obj_ds["idx"]
-                obj_pred["prompt"] = prompt
-                obj_pred["target"] = target
-                obj_pred["idx"] = idx
+            is_regression = self.dl_factory.get_problem_type() == "regression"
 
-                writer.write(obj_pred)
+            with jsonlines.open(str(combined_file), mode="w") as writer:
+                for (obj_ds, obj_pred) in tqdm(zip(input_ds, lines_out)):
+                    prompt = self.tokenizer.decode(
+                        obj_ds["input_ids"],
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False,
+                    )
+                    labels = obj_ds["labels"]
+                    target = self.tokenizer.decode(
+                        labels, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                    )
 
-                prediction = obj_pred["prediction"]
+                    idx = obj_ds["idx"]
+                    obj_pred["prompt"] = prompt
+                    obj_pred["target"] = target
+                    obj_pred["idx"] = idx
 
-                is_correct = prediction == target
+                    writer.write(obj_pred)
 
-                diff = 0
-                if is_regression:
-                    if not is_correct:
-                        diff = abs(labels - prediction)
+                    prediction = obj_pred["prediction"]
 
-                pred_table.add_data(idx, prompt, target, prediction, is_correct, diff)
+                    is_correct = prediction == target
 
-        self.logger.log({f"pred_{split}/model_outputs": pred_table})
-        self.logger.save(str(combined_file.absolute()), policy="now")
+                    diff = 0
+                    if is_regression:
+                        if not is_correct:
+                            diff = abs(labels - prediction)
+
+                    pred_table.add_data(idx, prompt, target, prediction, is_correct, diff)
+
+            self.logger.log({f"pred_{split}/model_outputs": pred_table})
+            self.logger.save(str(combined_file.absolute()), policy="now")
 
         logger.info(f"Done combing!")
