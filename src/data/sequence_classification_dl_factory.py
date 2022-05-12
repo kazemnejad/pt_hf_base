@@ -26,7 +26,7 @@ logger = logging.getLogger("app")
 class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
     def __init__(
         self,
-        input_prompt: str,
+        input_prompt: Optional[str] = None,
         label_list: Optional[List[str]] = None,
         is_regression: Optional[bool] = False,
         decoder_only_cls_token: Optional[str] = "\n",
