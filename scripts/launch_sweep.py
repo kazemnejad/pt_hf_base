@@ -7,13 +7,13 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Any
+
 site.addsitedir("src/")
 
 import _jsonnet
 import yaml
 
 from common.nest import flatten
-
 
 
 def main(args: argparse.Namespace):
@@ -55,6 +55,22 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Make Experiment Bundle")
 
+    if os.path.exists("configs/project_name.json"):
+        with open("configs/project_name.json") as f:
+            import json
+
+            default_proj_name = json.load(f)["project_name"]
+    else:
+        default_proj_name = None
+
+    if os.path.exists("configs/entity_name.json"):
+        with open("configs/entity_name.json") as f:
+            import json
+
+            default_entity_name = json.load(f)["entity_name"]
+    else:
+        default_entity_name = None
+
     parser.add_argument(
         "config_files",
         metavar="CONFIG_YAML",
@@ -68,8 +84,16 @@ if __name__ == "__main__":
         "--project",
         metavar="project",
         type=str,
-        default="comp-gen_v2",
+        default=default_proj_name,
         help="Wandb project",
+    )
+
+    parser.add_argument(
+        "--entity",
+        metavar="entity",
+        type=str,
+        default=default_entity_name,
+        help="Wandb entity",
     )
 
     args = parser.parse_args()
