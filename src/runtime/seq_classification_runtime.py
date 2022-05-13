@@ -58,7 +58,9 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                 _ = model_kwargs.pop("tokenizer")
 
             logger.info(f"Loading initial model weights from {arg}...")
-            model = model_class.from_pretrained(arg, **model_kwargs, cache_dir=str(self.cache_dir))
+            model = model_class.from_pretrained(
+                arg, **model_kwargs, cache_dir=str(self.cache_dir)
+            )
         else:
             model = model_constructor(**model_kwargs)
             has_handled_tokenizer = True
@@ -141,20 +143,11 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
     def combine_pred(self, split: str = "test"):
         logger.info(f"*** Combing predictions on split: {split} ***")
 
-        prediction_path = self.exp_root / f"pred_out_{split}.jsonl"
-        logger.info(f"Prediction path: {prediction_path}")
-        assert prediction_path.exists()
-
-        stage = ExperimentStage.from_split(split)
-
         import jsonlines
 
-        lines_out = []
-        with jsonlines.open(str(prediction_path)) as reader:
-            for obj in reader:
-                lines_out.append(obj)
-
-        input_ds = self.dl_factory.get_dataset(stage)
+        stage = ExperimentStage.PREDICTION
+        ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(split))
+        input_ds = self.dl_factory.get_dataset(stage=stage, path=ds_path)
 
         if not isinstance(input_ds, dict):
             input_ds_dict = {split: input_ds}
@@ -162,6 +155,15 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
             input_ds_dict = input_ds
 
         for split, input_ds in input_ds_dict.items():
+            prediction_path = self.exp_root / f"pred_out_{split}.jsonl"
+            logger.info(f"Prediction path: {prediction_path}")
+            assert prediction_path.exists()
+
+            lines_out = []
+            with jsonlines.open(str(prediction_path)) as reader:
+                for obj in reader:
+                    lines_out.append(obj)
+
             assert len(input_ds) == len(lines_out)
 
             pred_table = wandb.Table(
@@ -197,7 +199,9 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                         if not is_correct:
                             diff = abs(labels - prediction)
 
-                    pred_table.add_data(idx, prompt, target, prediction, is_correct, diff)
+                    pred_table.add_data(
+                        idx, prompt, target, prediction, is_correct, diff
+                    )
 
             self.logger.log({f"pred_{split}/model_outputs": pred_table})
             self.logger.save(str(combined_file.absolute()), policy="now")
