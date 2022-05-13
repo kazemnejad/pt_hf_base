@@ -179,9 +179,7 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                         clean_up_tokenization_spaces=False,
                     )
                     labels = obj_ds["labels"]
-                    target = self.tokenizer.decode(
-                        labels, skip_special_tokens=True, clean_up_tokenization_spaces=False
-                    )
+                    target = self.dl_factory.id2label[labels]
 
                     idx = obj_ds["idx"]
                     obj_pred["prompt"] = prompt
