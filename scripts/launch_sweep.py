@@ -101,9 +101,9 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--name",
-        metavar="entity",
+        metavar="name",
         type=str,
-        help="Wandb entity",
+        help="Wandb sweep name",
     )
 
     args = parser.parse_args()
