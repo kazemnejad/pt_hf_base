@@ -1,5 +1,4 @@
 import argparse
-import json
 import os
 import shlex
 import site
@@ -44,9 +43,13 @@ def main(args: argparse.Namespace):
     print(yaml_path.open().read())
     print()
 
-    sweep_name = "_".join(
-        [os.path.splitext(os.path.basename(p))[0] for p in config_files]
-    )
+    if args.name is not None:
+        sweep_name = args.name
+    else:
+        sweep_name = "_".join(
+            [os.path.splitext(os.path.basename(p))[0] for p in config_files]
+        )
+
     subprocess.check_call(
         shlex.split(f"wandb sweep -e {args.entity} -p {project} --name {sweep_name} {yaml_path}")
     )
@@ -93,6 +96,13 @@ if __name__ == "__main__":
         metavar="entity",
         type=str,
         default=default_entity_name,
+        help="Wandb entity",
+    )
+
+    parser.add_argument(
+        "--name",
+        metavar="entity",
+        type=str,
         help="Wandb entity",
     )
 
