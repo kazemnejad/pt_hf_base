@@ -510,19 +510,23 @@ class Seq2SeqRuntime(Runtime):
         )
         trainer._load_state_dict_in_model(state_dict)
 
-    def train(self, eval_split: str = "valid"):
+    def train(self, eval_split: str = "valid", train_split: str ="train"):
         logger.info(f"*** Training ***")
         torch.cuda.empty_cache()
 
         model = self.create_model()
 
-        eval_stage = ExperimentStage.from_split(eval_split)
-        eval_dataset = self.dl_factory.get_dataset(stage=eval_stage)
+        stage = ExperimentStage.TRAINING
+
+        eval_ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(eval_split))
+        eval_dataset = self.dl_factory.get_dataset(stage=stage, path=eval_ds_path)
         if eval_dataset is None:
             logger.info(
                 "No evaluation dataset found. Disabled evaluation during training."
             )
-        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING)
+
+        train_ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(train_split))
+        train_dataset = self.dl_factory.get_dataset(stage=stage, path=train_ds_path)
 
         trainer = self.create_trainer(
             ExperimentStage.TRAINING,
