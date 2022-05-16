@@ -1,5 +1,4 @@
 import argparse
-import json
 import os
 import shlex
 import site
@@ -173,6 +172,7 @@ def make_run_script_sweep_agent(
 
     script += f"\nexport WANDB_RUN_GROUP=sweep-{sweep_key}\n"
     script += f"export WANDB_DIR=experiments/wandb_sweep_{sweep_key}\n"
+    script += f"export SWEEP_ID={sweep_id}\n"
     script += f"mkdir -p $WANDB_DIR\n"
 
     script += f"ln -srnf experiments/wandb_sweep_{sweep_key} experiments/{exp_name}/wandb_sweep_{sweep_key}\n"
