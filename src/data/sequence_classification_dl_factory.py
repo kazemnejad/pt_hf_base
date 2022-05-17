@@ -30,6 +30,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         label_list: Optional[List[str]] = None,
         is_regression: Optional[bool] = False,
         decoder_only_cls_token: Optional[str] = None,
+        truncate_source: Optional[bool] = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -38,6 +39,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         self.is_regression = is_regression
         self.input_prompt = input_prompt
         self.decoder_only_cls_token = decoder_only_cls_token
+        self.truncate_source = truncate_source
 
         if is_regression and label_list is not None:
             raise ValueError(
@@ -88,6 +90,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         tokenizer = self.tokenizer
         max_source_length = self.max_source_length
         label_key = self.target_seq_key
+        truncate_source = self.truncate_source
 
         input_keys = self.input_prompt.split("|")
         decoder_only_input_output_sep_token = self.decoder_only_input_output_sep_token
@@ -105,11 +108,12 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
                 + f"{decoder_only_cls_token}"
             )
 
+            max_length = None if not truncate_source else max_source_length
             input_ids = tokenizer(
                 prompt,
-                truncation=True,
+                truncation=truncate_source,
                 add_special_tokens=False,
-                max_length=max_source_length,
+                max_length=max_length,
             ).input_ids
 
             labels = example[label_key]
