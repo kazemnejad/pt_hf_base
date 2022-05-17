@@ -22,7 +22,7 @@ from transformers import (
     Seq2SeqTrainingArguments,
     WEIGHTS_NAME,
     ProgressCallback,
-    TrainerCallback,
+    TrainerCallback, EarlyStoppingCallback,
 )
 from transformers.integrations import WandbCallback
 from transformers.trainer_pt_utils import metrics_format
@@ -404,6 +404,14 @@ class Seq2SeqRuntime(Runtime):
         if kwargs.get("eval_dataset", None) is None:
             training_args["evaluation_strategy"] = "no"
 
+        callbacks = [CustomWandbCallback()]
+        early_stopping = training_args.pop("early_stopping", None)
+        if early_stopping is not None:
+            logger.info(f"Enabled early stopping at {early_stopping}")
+            callbacks.append(EarlyStoppingCallback(
+                early_stopping_patience=early_stopping
+            ))
+
         trainer_type = training_args.pop("type", BaseTrainer.default_implementation)
         trainer_class = BaseTrainer.resolve_class_name(trainer_type)[0]
 
@@ -427,7 +435,7 @@ class Seq2SeqRuntime(Runtime):
             tokenizer=getattr(self.dl_factory, "tokenizer", None),
             data_collator=self.dl_factory.get_collate_fn(stage),
             compute_metrics=self.dl_factory.get_compute_metric_fn(stage),
-            callbacks=[CustomWandbCallback()],
+            callbacks=callbacks,
             **kwargs,
         )
         trainer.eval_data_collator = eval_data_collator
