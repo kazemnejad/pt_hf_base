@@ -18,8 +18,7 @@ from common.nest import flatten
 def main(args: argparse.Namespace):
     project: str = args.project
     config_files = args.config_files
-    if not isinstance(config_files, (tuple, list)):
-        config_files = [config_files]
+    config_files = [f.strip() for f in config_files.split(",")]
     print(config_files)
 
     jsonnet_str = "+".join([f'(import "{f}")' for f in config_files])
