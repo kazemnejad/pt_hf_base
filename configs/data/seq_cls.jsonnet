@@ -7,7 +7,6 @@ base + {
         target_seq_key: 'label',
         max_source_length: 512,
 
-        is_decoder_only: true,
         decoder_only_group_samples: false,
         decoder_only_mask_inputs: false,
 
