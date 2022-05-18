@@ -13,7 +13,7 @@ from transformers import (
     DataCollatorWithPadding,
 )
 
-from common import ExperimentStage
+from common import ExperimentStage, JsonDict
 from common import Lazy, Params
 from data import Seq2SeqDataLoaderFactory
 from data.base_dl_factory import DataLoaderFactory
@@ -31,6 +31,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         is_regression: Optional[bool] = False,
         decoder_only_cls_token: Optional[str] = None,
         truncate_source: Optional[bool] = True,
+        is_encoder_only: Optional[bool] = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -40,6 +41,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         self.input_prompt = input_prompt
         self.decoder_only_cls_token = decoder_only_cls_token
         self.truncate_source = truncate_source
+        self.is_encoder_only = is_encoder_only
 
         if is_regression and label_list is not None:
             raise ValueError(
@@ -84,6 +86,20 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
 
         return ds
 
+    def _get_tokenize_function(
+        self, add_special_tokens: bool = True, is_training: bool = True
+    ) -> Callable[[JsonDict], JsonDict]:
+        if self.is_decoder_only:
+            return self._get_tokenize_function_for_decoder_only(
+                add_special_tokens=add_special_tokens, is_training=is_training
+            )
+        elif self.is_encoder_only:
+            return self._get_tokenize_function_for_encoder_only(
+                add_special_tokens=add_special_tokens
+            )
+        else:
+            raise ValueError("Invalid architecture type")
+
     def _get_tokenize_function_for_decoder_only(
         self, add_special_tokens: bool = True, is_training: bool = True
     ) -> Callable:
@@ -114,6 +130,43 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
                 truncation=truncate_source,
                 add_special_tokens=False,
                 max_length=max_length,
+            ).input_ids
+
+            labels = example[label_key]
+            if isinstance(labels, str):
+                labels = label2id[labels]
+
+            attention_mask = [1] * len(input_ids)
+
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "labels": labels,
+            }
+
+        return tokenize
+
+    def _get_tokenize_function_for_encoder_only(
+        self, add_special_tokens: bool = True, is_training: bool = True
+    ) -> Callable:
+        tokenizer = self.tokenizer
+        max_source_length = self.max_source_length
+        label_key = self.target_seq_key
+        truncate_source = self.truncate_source
+
+        input_keys = self.input_prompt.split("|")
+        label2id = self.label2id
+
+        def tokenize(example: Dict[str, Any]) -> Dict[str, Any]:
+            inputs = [example[key] for key in input_keys]
+
+            max_length = None if not truncate_source else max_source_length
+            input_ids = tokenizer(
+                *inputs,
+                truncation=truncate_source,
+                add_special_tokens=add_special_tokens,
+                max_length=max_length,
+                return_tensors=None
             ).input_ids
 
             labels = example[label_key]
@@ -181,6 +234,8 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
                 padding="longest",
                 include_position_ids=self.decoder_only_include_position_ids,
             )
+        elif self.is_encoder_only:
+            collator = DataCollatorWithPadding(self.tokenizer, padding="longest")
         else:
             collator = DataCollatorForSeq2Seq(
                 self.tokenizer, label_pad_token_id=-100, padding="longest"
@@ -258,7 +313,8 @@ if __name__ == "__main__":
                 "label_list": ["not_equivalent", "equivalent"],
                 "input_prompt": "sentence1|sentence2",
                 "is_regression": False,
-                "is_decoder_only": True,
+                "is_decoder_only": False,
+                "is_encoder_only": True,
                 "train_filename": "train.jsonl",
                 "validation_filename": "validation.jsonl",
                 "test_filename": "test.jsonl",
@@ -272,7 +328,7 @@ if __name__ == "__main__":
         params=Params(
             {
                 "type": "pretrained",
-                "hf_model_name": "EleutherAI/gpt-neo-125M",
+                "hf_model_name": "roberta-large",
                 # "use_fast": False,
                 # "type": "whitespace",
             }
@@ -296,7 +352,7 @@ if __name__ == "__main__":
 
     b = [ds[i] for i in range(2)]
 
-    print(dc(b, return_tensors="pt"))
+    print(dc(b))
     print(ds[0])
 
     from torch.utils.data import DataLoader
