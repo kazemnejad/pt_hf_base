@@ -31,7 +31,7 @@ class SequenceClassificationDataLoaderFactory(Seq2SeqDataLoaderFactory):
         is_regression: Optional[bool] = False,
         decoder_only_cls_token: Optional[str] = None,
         truncate_source: Optional[bool] = True,
-        is_encoder_only: Optional[bool] = True,
+        is_encoder_only: Optional[bool] = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
