@@ -524,17 +524,15 @@ class Seq2SeqRuntime(Runtime):
 
         model = self.create_model()
 
-        stage = ExperimentStage.TRAINING
-
         eval_ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(eval_split))
-        eval_dataset = self.dl_factory.get_dataset(stage=stage, path=eval_ds_path)
+        eval_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.VALIDATION, path=eval_ds_path)
         if eval_dataset is None:
             logger.info(
                 "No evaluation dataset found. Disabled evaluation during training."
             )
 
         train_ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(train_split))
-        train_dataset = self.dl_factory.get_dataset(stage=stage, path=train_ds_path)
+        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING, path=train_ds_path)
 
         trainer = self.create_trainer(
             ExperimentStage.TRAINING,
