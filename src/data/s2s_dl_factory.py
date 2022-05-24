@@ -94,7 +94,7 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
             self.tokenizer.pad_token = self.tokenizer.convert_ids_to_tokens(0)
 
         if self.is_decoder_only:
-            if tokenizer.unk_token_id in tokenizer.tokenize(
+            if tokenizer.unk_token in tokenizer.tokenize(
                 self.decoder_only_input_output_sep_token
             ):
                 logger.info("Appending input_output separator token...")
