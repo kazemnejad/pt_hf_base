@@ -400,6 +400,7 @@ class Seq2SeqRuntime(Runtime):
             kwargs["model"] = self.create_model()
 
         model = kwargs.get("model")
+        eval_split_name = kwargs.pop("eval_split_name", None)
 
         training_args = self.training_args
         training_args["output_dir"] = str(self.exp_root / "checkpoints")
@@ -418,14 +419,14 @@ class Seq2SeqRuntime(Runtime):
 
         user_callbacks = training_args.pop("callbacks", None)
         if user_callbacks is not None:
-            for config_obj in self.analyzers:
+            for config_obj in user_callbacks:
                 cb = Callback.from_params(Params(config_obj))
                 cb.init(
                     self,
                     kwargs.get("eval_dataset", None),
-                    kwargs.get("eval_split_name", None),
+                    eval_split_name,
                 )
-            callbacks += user_callbacks
+                callbacks.append(cb)
 
         trainer_type = training_args.pop("type", BaseTrainer.default_implementation)
         trainer_class = BaseTrainer.resolve_class_name(trainer_type)[0]
@@ -455,7 +456,7 @@ class Seq2SeqRuntime(Runtime):
         )
         trainer.eval_data_collator = eval_data_collator
 
-        for cb in user_callbacks:
+        for cb in callbacks:
             if hasattr(cb, "set_trainer") and callable(cb.set_trainer):
                 cb.set_trainer(trainer)
 
