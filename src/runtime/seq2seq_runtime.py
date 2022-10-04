@@ -779,7 +779,7 @@ class Seq2SeqRuntime(Runtime):
         self.train(eval_split)
         self.predict(eval_split, load_best=load_best, enable_metrics=True)
         self.combine_pred(eval_split)
-        self.analyze_all(load_best=load_best)
+        self.analyze_all(load_best=load_best, split=eval_split)
 
     def analyze(self, config_filenames: str, load_best: bool = True):
         config_filenames = [fn.strip() for fn in config_filenames.split(",")]
