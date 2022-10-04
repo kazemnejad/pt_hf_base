@@ -456,7 +456,7 @@ class Seq2SeqRuntime(Runtime):
         trainer.eval_data_collator = eval_data_collator
 
         for cb in user_callbacks:
-            if hasattr(cb, "set_trainer"):
+            if hasattr(cb, "set_trainer") and callable(cb.set_trainer):
                 cb.set_trainer(trainer)
 
         return trainer
