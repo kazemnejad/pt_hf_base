@@ -22,7 +22,8 @@ from transformers import (
     Seq2SeqTrainingArguments,
     WEIGHTS_NAME,
     ProgressCallback,
-    TrainerCallback, EarlyStoppingCallback,
+    TrainerCallback,
+    EarlyStoppingCallback,
 )
 from transformers.integrations import WandbCallback
 from transformers.trainer_pt_utils import metrics_format
@@ -31,6 +32,7 @@ from wandb.sdk.wandb_run import Run
 
 import common.nest
 from analyzers import Analyzer
+from callbacks import Callback
 from common.from_params import create_kwargs
 from common.nest import unflatten
 from hp_search_space import HPSearchSpace
@@ -381,7 +383,9 @@ class Seq2SeqRuntime(Runtime):
                 _ = model_kwargs.pop("tokenizer")
 
             logger.info(f"Loading initial model weights from {arg}...")
-            model = model_class.from_pretrained(arg, **model_kwargs, cache_dir=str(self.cache_dir))
+            model = model_class.from_pretrained(
+                arg, **model_kwargs, cache_dir=str(self.cache_dir)
+            )
         else:
             model = model_constructor(**model_kwargs)
             has_handled_tokenizer = True
@@ -408,9 +412,20 @@ class Seq2SeqRuntime(Runtime):
         early_stopping = training_args.pop("early_stopping", None)
         if early_stopping is not None:
             logger.info(f"Enabled early stopping at {early_stopping}")
-            callbacks.append(EarlyStoppingCallback(
-                early_stopping_patience=early_stopping
-            ))
+            callbacks.append(
+                EarlyStoppingCallback(early_stopping_patience=early_stopping)
+            )
+
+        user_callbacks = training_args.pop("callbacks", None)
+        if user_callbacks is not None:
+            for config_obj in self.analyzers:
+                cb = Callback.from_params(Params(config_obj))
+                cb.init(
+                    self,
+                    kwargs.get("eval_dataset", None),
+                    kwargs.get("eval_split_name", None),
+                )
+            callbacks += user_callbacks
 
         trainer_type = training_args.pop("type", BaseTrainer.default_implementation)
         trainer_class = BaseTrainer.resolve_class_name(trainer_type)[0]
@@ -439,6 +454,10 @@ class Seq2SeqRuntime(Runtime):
             **kwargs,
         )
         trainer.eval_data_collator = eval_data_collator
+
+        for cb in user_callbacks:
+            if hasattr(cb, "set_trainer"):
+                cb.set_trainer(trainer)
 
         return trainer
 
@@ -518,27 +537,36 @@ class Seq2SeqRuntime(Runtime):
         )
         trainer._load_state_dict_in_model(state_dict)
 
-    def train(self, eval_split: str = "valid", train_split: str ="train"):
+    def train(self, eval_split: str = "valid", train_split: str = "train"):
         logger.info(f"*** Training ***")
         torch.cuda.empty_cache()
 
         model = self.create_model()
 
-        eval_ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(eval_split))
-        eval_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.VALIDATION, path=eval_ds_path)
+        eval_ds_path = self.dl_factory.get_ds_file_path(
+            ExperimentStage.from_split(eval_split)
+        )
+        eval_dataset = self.dl_factory.get_dataset(
+            stage=ExperimentStage.VALIDATION, path=eval_ds_path
+        )
         if eval_dataset is None:
             logger.info(
                 "No evaluation dataset found. Disabled evaluation during training."
             )
 
-        train_ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(train_split))
-        train_dataset = self.dl_factory.get_dataset(stage=ExperimentStage.TRAINING, path=train_ds_path)
+        train_ds_path = self.dl_factory.get_ds_file_path(
+            ExperimentStage.from_split(train_split)
+        )
+        train_dataset = self.dl_factory.get_dataset(
+            stage=ExperimentStage.TRAINING, path=train_ds_path
+        )
 
         trainer = self.create_trainer(
             ExperimentStage.TRAINING,
             model=model,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
+            eval_split_name=eval_split,
         )
         self.log_number_of_parameters(trainer.model)
 
