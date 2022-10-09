@@ -47,7 +47,14 @@ class SavePredictionsCallback(Callback):
         self._save_predictions(state, tokenizer)
 
     def _save_predictions(self, state: TrainerState, tokenizer: PreTrainedTokenizer):
+        if hasattr(self._trainer, "eval_data_collator"):
+            eval_data_collator = self._trainer.eval_data_collator
+            old_data_collator = self._trainer.data_collator
+            self._trainer.data_collator = eval_data_collator
+
         test_results = self._trainer.predict(self.dataset, metric_key_prefix=f"pred")
+        if hasattr(self._trainer, "eval_data_collator"):
+            self._trainer.data_collator = old_data_collator
 
         if state.is_world_process_zero:
             preds = test_results.predictions
