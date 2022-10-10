@@ -17,8 +17,22 @@ os.environ[wandb_env.SILENT] = "true"
 os.environ[wandb_env.DISABLE_CODE] = "true"
 
 
+def maybe_add_post_script(args) -> str:
+    if args is not None and args.post_script is not None:
+        post_script = args.post_script
+        script = f"\nchmod a+x {post_script}\n"
+        script += f"{post_script}\n"
+        return script
+    return ""
+
+
 def make_run_script(
-    configs: str, commands: str, env_vars: str, exp_key: str, exp_name: str
+    configs: str,
+    commands: str,
+    env_vars: str,
+    exp_key: str,
+    exp_name: str,
+    args=None,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
 
@@ -38,6 +52,8 @@ def make_run_script(
         c = c.strip()
         script += f"python src/main.py --configs '{configs_str}' \\\n"
         script += f"       {c}\n\n"
+
+    script += maybe_add_post_script(args)
 
     script += 'echo "Experiment finished!"\n'
 
@@ -76,6 +92,7 @@ def make_run_script_seeds(
     exp_key: str,
     exp_name: str,
     seeds: int,
+    args=None,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
 
@@ -107,6 +124,7 @@ def make_run_script_seeds(
 
     script += "done\n"
 
+    script += maybe_add_post_script(args)
     script += '\necho "Experiment finished!"\n'
 
     tmp_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
@@ -157,6 +175,7 @@ def make_run_script_sweep_agent(
     exp_key: str,
     exp_name: str,
     sweep_id: str,
+    args=None,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
 
@@ -180,6 +199,7 @@ def make_run_script_sweep_agent(
     script += f"\nchmod a+x ./job.sh\n"
     script += f"wandb agent {sweep_id}\n"
 
+    script += maybe_add_post_script(args)
     script += '\necho "Experiment finished!"\n'
 
     tmp_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
@@ -261,6 +281,9 @@ def main(args: argparse.Namespace):
         job_type = "agent"
         group = f"sweep-{os.path.basename(args.sweep_id)}"
 
+    if args.group is not None:
+        group = args.group
+
     dir_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
     dir_dir.mkdir(parents=True, exist_ok=True)
     settings = wandb.Settings()
@@ -284,7 +307,7 @@ def main(args: argparse.Namespace):
         settings=settings,
         job_type=job_type,
         id=args.idx,
-        resume="allow"
+        resume="allow",
     )
 
     run_id = run.id
@@ -292,18 +315,35 @@ def main(args: argparse.Namespace):
     job_script_path = None
     if args.seeds is not None:
         run_script_path = make_run_script_seeds(
-            configs, args.commands, args.env_vars, run_id, exp_name, args.seeds
+            configs,
+            args.commands,
+            args.env_vars,
+            run_id,
+            exp_name,
+            args.seeds,
+            args=args,
         )
     elif args.sweep_id is not None:
         run_script_path = make_run_script_sweep_agent(
-            configs, args.commands, args.env_vars, run_id, exp_name, args.sweep_id
+            configs,
+            args.commands,
+            args.env_vars,
+            run_id,
+            exp_name,
+            args.sweep_id,
+            args=args,
         )
         job_script_path = make_run_script_sweep_job(
-            configs, args.commands, args.env_vars, run_id, exp_name, args.sweep_id
+            configs,
+            args.commands,
+            args.env_vars,
+            run_id,
+            exp_name,
+            args.sweep_id,
         )
     else:
         run_script_path = make_run_script(
-            configs, args.commands, args.env_vars, run_id, exp_name
+            configs, args.commands, args.env_vars, run_id, exp_name, args=args
         )
 
     metadata_path = make_metadata(exp_name, run_id)
@@ -348,6 +388,7 @@ if __name__ == "__main__":
     if os.path.exists("configs/project_name.json"):
         with open("configs/project_name.json") as f:
             import json
+
             default_proj_name = json.load(f)["project_name"]
     else:
         default_proj_name = None
@@ -355,6 +396,7 @@ if __name__ == "__main__":
     if os.path.exists("configs/entity_name.json"):
         with open("configs/entity_name.json") as f:
             import json
+
             default_entity_name = json.load(f)["entity_name"]
     else:
         default_entity_name = None
@@ -432,6 +474,20 @@ if __name__ == "__main__":
         metavar="IDX",
         type=str,
         help="Experiment Idx",
+    )
+
+    parser.add_argument(
+        "--group",
+        metavar="GROUP",
+        type=str,
+        help="Wandb run group name",
+    )
+
+    parser.add_argument(
+        "--post_script",
+        metavar="POST_SCRIPT_PATH",
+        type=str,
+        help="Path to post script",
     )
 
     args = parser.parse_args()
