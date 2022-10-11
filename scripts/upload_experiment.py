@@ -147,7 +147,7 @@ def make_run_script_sweep_job(
     seeds: int,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
-    script += "\nexport WANDB_JOB_TYPE=exp\n\n\n"
+    script += "\nexport WANDB_JOB_TYPE=hp_exp\n\n\n"
 
     configs_str = configs
     for c in commands.split(","):
