@@ -102,7 +102,7 @@ def make_run_script_seeds(
             script += f"export {ev}\n"
 
     # script += f"export WANDB_RUN_ID={exp_key}\n"
-    script += f"export WANDB_RUN_GROUP=SE-{exp_name}\n"
+    script += f"export WANDB_RUN_GROUP={args.group}\n"
     script += f"export ORIG_APP_EXPERIMENT_NAME={exp_name}\n"
     script += f"export ORIG_WANDB_RUN_ID={exp_key}\n"
 
@@ -189,7 +189,7 @@ def make_run_script_sweep_agent(
 
     sweep_key = os.path.basename(sweep_id)
 
-    script += f"\nexport WANDB_RUN_GROUP=sweep-{sweep_key}\n"
+    script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
     script += f"export WANDB_DIR=experiments/wandb_sweep_{sweep_key}\n"
     script += f"export SWEEP_ID={sweep_id}\n"
     script += f"mkdir -p $WANDB_DIR\n"
@@ -283,6 +283,8 @@ def main(args: argparse.Namespace):
 
     if args.group is not None:
         group = args.group
+    else:
+        args.group = group
 
     dir_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
     dir_dir.mkdir(parents=True, exist_ok=True)
