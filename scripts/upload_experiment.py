@@ -257,7 +257,7 @@ def main(args: argparse.Namespace):
     entity: str = args.entity
     configs: str = args.configs
 
-    print("# ----> 1. Generating a unique experiment name...")
+
     exp_name = get_exp_name(configs)
 
     if args.dataset is not None:
@@ -269,6 +269,12 @@ def main(args: argparse.Namespace):
 
     if args.name is not None:
         exp_name += args.name
+
+    if args.output_only_name:
+        print(exp_name)
+        return
+
+    print("# ----> 1. Generating a unique experiment name...")
 
     import wandb
 
@@ -490,6 +496,13 @@ if __name__ == "__main__":
         metavar="POST_SCRIPT_PATH",
         type=str,
         help="Path to post script",
+    )
+
+    parser.add_argument(
+        "--output_only_name",
+        action="store_true",
+        help="Print only the name of the experiment",
+        default=False,
     )
 
     args = parser.parse_args()
