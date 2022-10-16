@@ -617,39 +617,53 @@ def download_bundle(exp_key: str, output_dir: Path):
         data_dir.mkdir(parents=True, exist_ok=True)
         data_artifact.download(str(data_dir))
 
+
 def main(args):
-    if args.list:
-        list_experiments(args)
-        exit(0)
+    if args.bundle is not None:
+        if "," not in args.bundle:
+            bundles = [args.bundle]
+        else:
+            bundles = args.bundle.split(",")
+            bundles = [b.strip() for b in bundles if b != ""]
+    else:
+        bundles = [None]
 
-    if args.download:
+    print("Bundles:", bundles)
+    for bundle in bundles:
+        args.bundle = bundle
+
+        if args.list:
+            list_experiments(args)
+            exit(0)
+
+        if args.download:
+            if args.platform == "mila":
+                download_trained_model_on_mila(args)
+            elif args.platform == "cc":
+                download_trained_model_on_cc(args)
+            if args.platform == "ava":
+                download_trained_model_on_ava(args)
+            exit(0)
+
+        if args.upload:
+            if args.platform == "mila":
+                upload_on_mila(args)
+            elif args.platform == "cc":
+                upload_on_cc(args)
+            if args.platform == "ava":
+                upload_on_ava(args)
+            continue
+
         if args.platform == "mila":
-            download_trained_model_on_mila(args)
+            run_on_mila(args)
         elif args.platform == "cc":
-            download_trained_model_on_cc(args)
+            run_on_cc(args)
         if args.platform == "ava":
-            download_trained_model_on_ava(args)
-        exit(0)
-
-    if args.upload:
-        if args.platform == "mila":
-            upload_on_mila(args)
-        elif args.platform == "cc":
-            upload_on_cc(args)
-        if args.platform == "ava":
-            upload_on_ava(args)
-        exit(0)
-
-    if args.platform == "mila":
-        run_on_mila(args)
-    elif args.platform == "cc":
-        run_on_cc(args)
-    if args.platform == "ava":
-        run_on_ava(args)
-    elif args.platform == "slurm":
-        run_on_slurm(args)
-    elif args.platform == "cl":
-        run_on_cl(args)
+            run_on_ava(args)
+        elif args.platform == "slurm":
+            run_on_slurm(args)
+        elif args.platform == "cl":
+            run_on_cl(args)
 
 
 
