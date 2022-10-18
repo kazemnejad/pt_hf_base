@@ -263,9 +263,9 @@ class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
                 )
                 loss = loss.view(*shift_labels.size())
 
-                per_token_loss = loss
+                per_example_loss = loss
 
-        return per_token_loss
+        return per_example_loss
 
     def get_eval_dataloader(self, eval_dataset: Optional[datasets.Dataset] = None):
         """
