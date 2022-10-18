@@ -196,7 +196,7 @@ class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
         model: nn.Module,
         inputs: Dict[str, Union[torch.Tensor, Any]],
         ignore_keys: Optional[List[str]] = None,
-    ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> torch.Tensor:
         """
         Perform an evaluation step on `model` using `inputs`.
 
@@ -212,7 +212,7 @@ class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
                 argument `labels`. Check your model's documentation for all accepted arguments.
 
         Return:
-            Optional[torch.Tensor]: loss per example
+            torch.Tensor: loss per example
         """
 
 
