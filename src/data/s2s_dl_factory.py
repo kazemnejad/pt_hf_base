@@ -139,6 +139,8 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
         tokenize: bool = True,
         **kwargs,
     ) -> Dataset:
+        logger.info(f"Building dataset for stage {stage} and path {path}...")
+
         ds = self._build_base_dataset(path)
 
         set_progress_bar_enabled(False)

@@ -31,6 +31,7 @@ class DataLoaderFactory(Registrable):
         test_batch_size: int = 2,
         shuffle: bool = False,
         dataloader: Optional[Lazy[DIDataloader]] = None,
+        **kwargs,
     ):
         data_root = Path(data_root)
 
