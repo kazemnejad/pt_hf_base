@@ -3,6 +3,7 @@ from typing import Dict, Union, Optional, List, Tuple, Any
 import datasets
 import torch
 from torch import nn
+from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from transformers import IntervalStrategy, is_datasets_available
 from transformers.deepspeed import is_deepspeed_zero3_enabled
@@ -10,6 +11,7 @@ from transformers.trainer_pt_utils import IterableDatasetShard
 
 from trainers.base_trainer import BaseTrainer
 from trainers.trainer_with_metrics import Seq2SeqTrainerWithMetrics
+
 
 @BaseTrainer.register("decoder_only")
 class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
@@ -188,6 +190,82 @@ class DecoderOnlyTrainer(Seq2SeqTrainerWithMetrics):
             labels = None
 
         return (loss, generated_tokens, labels)
+
+    def prediction_step_loss_per_example(
+        self,
+        model: nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[List[str]] = None,
+    ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Perform an evaluation step on `model` using `inputs`.
+
+        Subclass and override to inject custom behavior.
+
+        Args:
+            model (`nn.Module`):
+                The model to evaluate.
+            inputs (`Dict[str, Union[torch.Tensor, Any]]`):
+                The inputs and targets of the model.
+
+                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+                argument `labels`. Check your model's documentation for all accepted arguments.
+            prediction_loss_only (`bool`):
+                Whether or not to return the loss only.
+
+        Return:
+            Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss, logits and
+            labels (each being optional).
+        """
+
+
+        has_labels = "labels" in inputs
+        assert has_labels, "labels are required for loss_per_example"
+
+        inputs = self._prepare_inputs(inputs)
+
+
+        with torch.no_grad():
+            with self.autocast_smart_context_manager():
+                if inputs["input_ids"].shape != inputs["labels"].shape:
+                    prompt_input_ids = inputs["input_ids"]
+                    labels_input_ids = inputs["labels"].clone().detach()
+
+                    labels_input_ids.masked_fill_(labels_input_ids == -100, 0)
+                    labels_input_ids = labels_input_ids[:, prompt_input_ids.shape[1]:, ...]
+
+                    new_input_ids = torch.cat([prompt_input_ids, labels_input_ids], dim=1)
+                    new_attn_mask = (new_input_ids != 0).int()
+                    inputs["input_ids"] = new_input_ids
+                    inputs["attention_mask"] = new_attn_mask
+
+                    position_ids = new_attn_mask.long().cumsum(-1) - 1
+                    position_ids.masked_fill_(new_attn_mask == 0, 1)
+                    inputs["position_ids"] = position_ids
+
+                outputs = model(**inputs)
+                lm_logits = outputs.logits
+                labels = inputs["labels"]
+
+                # Compute loss in fp32 to match with mesh-tf version
+                # https://github.com/EleutherAI/gpt-neo/blob/89ce74164da2fb16179106f54e2269b5da8db333/models/gpt2/gpt2.py#L179
+                lm_logits = lm_logits.to(torch.float32)
+
+                # Shift so that tokens < n predict n
+                shift_logits = lm_logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+
+                # Flatten the tokens
+                loss_fct = CrossEntropyLoss(reduction="none")
+                loss = loss_fct(
+                    shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+                )
+                loss = loss.view(*shift_labels.size())
+
+                per_token_loss = loss
+
+        return per_token_loss
 
     def get_eval_dataloader(self, eval_dataset: Optional[datasets.Dataset] = None):
         """
