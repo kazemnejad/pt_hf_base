@@ -127,7 +127,7 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                         desc="Decoding predictions",
                     ):
                         pred_texts = [
-                            p if is_regression else self.dl_factory.id2label[p]
+                            float(p) if is_regression else self.dl_factory.id2label[p]
                             for p in batch_preds
                         ]
 
@@ -181,7 +181,10 @@ class SequenceClassificationRuntime(Seq2SeqRuntime):
                         clean_up_tokenization_spaces=False,
                     )
                     labels = obj_ds["labels"]
-                    target = self.dl_factory.id2label[labels]
+                    if not is_regression:
+                        target = self.dl_factory.id2label[labels]
+                    else:
+                        target = labels
 
                     idx = obj_ds["idx"]
                     obj_pred["prompt"] = prompt
