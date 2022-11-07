@@ -770,7 +770,7 @@ class CustomT5Stack(T5Stack):
             if output_attentions:
                 all_attentions = all_attentions + (layer_outputs[3],)
                 if self.is_decoder:
-                    all_cross_attentions = all_cross_attentions + (layer_outputs[5],)
+                    all_cross_attentions = all_cross_attentions + (None,)
 
             # Model Parallel: If it's the last layer for that device, put things on the next device
             if self.model_parallel:
