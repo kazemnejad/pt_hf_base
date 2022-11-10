@@ -868,17 +868,18 @@ class Seq2SeqRuntime(Runtime):
                 logger.info(f"Loading checkpoints from {ckpt_dir}")
                 state_dict = torch.load(ckpt_dir / WEIGHTS_NAME, map_location="cpu")
                 trainer._load_state_dict_in_model(state_dict)
-        if load_best:
-            try:
-                self._load_best_checkpoint(trainer)
-            except:
-                logger.info(
-                    "Failed to load best checkpoint, Loading last checkpoint..."
-                )
-                self._load_last_checkpoint(trainer)
         else:
-            logger.info("Loading last checkpoint...")
-            self._load_last_checkpoint(trainer)
+            if load_best:
+                try:
+                    self._load_best_checkpoint(trainer)
+                except:
+                    logger.info(
+                        "Failed to load best checkpoint, Loading last checkpoint..."
+                    )
+                    self._load_last_checkpoint(trainer)
+            else:
+                logger.info("Loading last checkpoint...")
+                self._load_last_checkpoint(trainer)
 
         return trainer
 
