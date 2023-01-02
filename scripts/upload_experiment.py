@@ -44,7 +44,7 @@ def command_to_bash_str(
 ) -> str:
     cmd = cmd.strip()
     # Currently torch distributed is only supported for train and hp_step
-    if use_torch_distributed(args) and cmd in ["train", "hp_step"]:
+    if use_torch_distributed(args) and any([c in cmd for c in ["train", "hp_step", "predict"]]):
         script = (
             f"{prefix}torchrun --standalone --nnodes=1 --nproc_per_node=$NUM_GPUS \\\n"
         )
