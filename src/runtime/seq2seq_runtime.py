@@ -182,6 +182,9 @@ class Seq2SeqRuntime(Runtime):
         logger.info(f"Setting seed = {seed}")
         set_seed(seed)
 
+        if self.debug_mode:
+            logger.info(">>>>>>>>>>>>>>>>> DEBUG MODE <<<<<<<<<<<<<<<<<<<")
+
         if is_world_process_zero():
             assert self.logger is not None
 
