@@ -446,21 +446,21 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
             logger.info(f"tgt: {tgt}\n")
 
             # Log some dataset stats to the console
-            stats: Dict[str, Dataset] = {}
-            if "input_ids" in ds.column_names:
-                input_len_ds = ds.map(
-                    lambda x: {"input_ids_len": len(x["input_ids"])}, num_proc=4
-                )
-                stats["input_ids"] = input_len_ds
+            def compute_stat(example: JsonDict) -> JsonDict:
+                o = {}
+                if "input_ids" in example:
+                    o["input_ids_len"] = len(example["input_ids"])
+                if "labels" in example:
+                    o["labels_len"] = len(example["labels"])
+                return o
 
-            if "labels" in ds.column_names:
-                label_len_ds = ds.map(
-                    lambda x: {"labels_len": len(x["labels"])}, num_proc=4
-                )
-                stats["labels"] = label_len_ds
+            stats_ds = ds.map(compute_stat, num_proc=4)
 
-            for k, len_ds in stats.items():
-                len_values = np.array(len_ds[f"{k}_len"])
+            for k in ["input_ids", "labels"]:
+                if f"{k}_len" not in stats_ds:
+                    continue
+
+                len_values = np.array(stats_ds[f"{k}_len"])
                 mean = np.mean(len_values)
                 std = np.std(len_values)
                 the_min = np.min(len_values)
