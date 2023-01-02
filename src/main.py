@@ -1,4 +1,7 @@
 import random
+import time
+
+from common.torch_utils import is_world_process_zero, get_rank
 
 INITIAL_SEED = 12345
 random.seed(INITIAL_SEED)
@@ -20,7 +23,7 @@ from typing import Dict, Any, List
 import _jsonnet
 import fire
 
-from common import py_utils, Params, JsonDict, DEBUG_MODE
+from common import py_utils, Params, JsonDict
 from common.nest import unflatten
 from common.py_utils import unique_experiment_name
 from runtime import Runtime
@@ -51,15 +54,16 @@ class EntryPoint(object):
             config["global_vars"]["debug_mode"] = debug_mode
 
         if config.get("sweep_run", False):
-            config = self._patch_config_obj_for_sweep(config)
+            config = self._get_config_for_sweep(config)
         else:
             config["exp_name"] = os.environ.get(
                 "APP_EXPERIMENT_NAME", unique_experiment_name(config)
             )
 
-        config_str = json.dumps(config, indent=4, sort_keys=True)
-        logger.info(f"# configs: {filenames}")
-        logger.info(f"----Config----\n{config_str}\n--------------")
+        if is_world_process_zero():
+            config_str = json.dumps(config, indent=4, sort_keys=True)
+            logger.info(f"# configs: {filenames}")
+            logger.info(f"----Config----\n{config_str}\n--------------")
 
         self._dump_config_obj(config)
 
@@ -72,6 +76,42 @@ class EntryPoint(object):
 
         self._config = config
         self._exp = Runtime.from_params(Params({"config_dict": config, **config}))
+
+    def _get_config_for_sweep(self, config: JsonDict) -> JsonDict:
+        rank = get_rank()
+        if rank == -1:
+            return self._patch_config_obj_for_sweep(config)
+
+        run_id, exps_dir = self._get_sweep_run_id_and_dir(config)
+        cfg_dump_path = Path(exps_dir) / f"cfg_{run_id}.json"
+        if rank == 0:
+            cfg = self._patch_config_obj_for_sweep(config)
+            with cfg_dump_path.open("w") as f:
+                json.dump(cfg, f, indent=4, sort_keys=True)
+            time.sleep(0.1)
+        else:
+            # Poll for the config file to be created
+            while not cfg_dump_path.exists():
+                time.sleep(0.1)
+            logger.info(f"Rank {rank}: Fetched config from {cfg_dump_path}")
+            with cfg_dump_path.open("r") as f:
+                cfg = json.load(f)
+
+        return cfg
+
+    def _get_sweep_run_id_and_dir(self, config: JsonDict) -> (str, str):
+        from wandb import env as wandb_env
+
+        sweep_id = os.environ[wandb_env.SWEEP_ID]
+        run_id = os.environ[wandb_env.RUN_ID]
+
+        base_dir = Path(config.get("directory", "experiments"))
+        sweep_root = base_dir / f"wandb_sweep_{sweep_id}"
+
+        exps_dir = sweep_root / "exps"
+        exps_dir.mkdir(parents=True, exist_ok=True)
+
+        return run_id, str(exps_dir)
 
     def _patch_config_obj_for_sweep(self, config: JsonDict) -> JsonDict:
         import wandb

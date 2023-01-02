@@ -32,8 +32,8 @@ def get_rank() -> int:
         else:
             return int(os.environ.get("RANK", 0))
 
-    return 0
+    return -1
 
 
 def is_world_process_zero() -> bool:
-    return get_rank() == 0
+    return get_rank() in [0, -1]
