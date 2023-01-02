@@ -2,13 +2,11 @@ import copy
 import json
 import logging
 import os
-import random
 from collections import Sized
 from pathlib import Path
-from typing import Dict, Optional, Any, List, Callable
+from typing import Dict, Optional, Any, List
 
 import _jsonnet
-import dill
 import numpy as np
 import torch
 import transformers
@@ -22,7 +20,6 @@ from transformers import (
     Seq2SeqTrainingArguments,
     WEIGHTS_NAME,
     ProgressCallback,
-    TrainerCallback,
     EarlyStoppingCallback,
 )
 from transformers.integrations import WandbCallback
@@ -30,11 +27,11 @@ from transformers.trainer_pt_utils import metrics_format
 from transformers.trainer_utils import get_last_checkpoint
 from wandb.sdk.wandb_run import Run
 
-import common.nest
 from analyzers import Analyzer
 from callbacks import Callback
 from common.from_params import create_kwargs
 from common.nest import unflatten
+from common.torch_utils import is_world_process_zero
 from hp_search_space import HPSearchSpace
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
@@ -130,88 +127,6 @@ class CustomProgressCallback(ProgressCallback):
             self.training_bar.set_postfix(**last_log)
 
 
-class ClLoggerForWandb(TrainerCallback):
-    def __init__(
-        self,
-        wandb_logger,
-        log_dir: Path,
-        num_examples_to_log: int = 0,
-        num_reported_logs: int = 20,
-        inputs_transform_fn: Optional[
-            Callable[[List[JsonDict]], List[JsonDict]]
-        ] = None,
-    ):
-        self._has_logged = False
-        self._num_examples_to_log = num_examples_to_log
-        self._log_dir = log_dir / "cl_sampler"
-        self._logger = wandb_logger
-        self._inputs_trans_fn = inputs_transform_fn
-        self._num_reported_logs = num_reported_logs
-
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.is_world_process_zero and not self._has_logged:
-            log_obj_dir = self._log_dir / "log_objs"
-            if log_obj_dir.exists():
-                log_obj_paths = list(log_obj_dir.iterdir())
-                if len(log_obj_paths) < self._num_examples_to_log:
-                    return
-
-                self._log_to_wandb()
-                self._has_logged = True
-
-    def _log_to_wandb(self):
-        log_obj_dir = self._log_dir / "log_objs"
-        log_obj_paths = sorted(list(log_obj_dir.iterdir()))
-
-        all_log_objs = []
-        for log_path in log_obj_paths:
-            with log_path.open("rb") as f:
-                obj = dill.load(f)
-
-                obj = common.nest.flatten(obj, "/")
-                for k in obj.keys():
-                    if "_img" in k and obj[k] is not None:
-                        obj[k] = wandb.Image(obj[k])
-
-                obj = common.nest.unflatten_list(obj, "/")
-
-                all_log_objs.append(obj)
-
-        if len(all_log_objs) == 0:
-            return
-
-        if self._inputs_trans_fn is not None:
-            all_log_objs = self._inputs_trans_fn(all_log_objs)
-
-        all_columns = sorted(common.nest.flatten(all_log_objs[0]["anchor"], "/").keys())
-
-        substructure_repr_cols = [
-            c for c in all_columns if c.startswith("substructure_repr_")
-        ]
-        priority_columns = ["eId", "type", *substructure_repr_cols]
-        other_columns = [c for c in all_columns if c not in priority_columns]
-        columns = priority_columns + other_columns
-
-        all_log_objs = random.sample(all_log_objs, k=self._num_reported_logs)
-
-        def convert_to_row(example: JsonDict, type: str) -> List[Any]:
-            example = common.nest.flatten(example, "/")
-            example["type"] = type
-            row = [example[k] for k in columns]
-            return row
-
-        for i, obj in enumerate(all_log_objs):
-            table = wandb.Table(columns=columns)
-
-            table.add_data(*convert_to_row(obj["anchor"], "anchor"))
-            for j, p in enumerate(obj["positives"]):
-                table.add_data(*convert_to_row(p, f"pos_{j}"))
-            for j, p in enumerate(obj["negatives"]):
-                table.add_data(*convert_to_row(p, f"neg_{j}"))
-
-            self._logger.log({f"cl_samples/#{obj['idx']}": table})
-
-
 from transformers import trainer
 
 trainer.DEFAULT_PROGRESS_CALLBACK = CustomProgressCallback
@@ -267,7 +182,8 @@ class Seq2SeqRuntime(Runtime):
         logger.info(f"Setting seed = {seed}")
         set_seed(seed)
 
-        assert self.logger is not None
+        if is_world_process_zero():
+            assert self.logger is not None
 
         self.dl_factory = self.lazy_dataset.construct(
             cache_dir=self.cache_dir, log_dir=self.logs_dir
@@ -290,6 +206,9 @@ class Seq2SeqRuntime(Runtime):
         self.analyzers = analyzers or []
 
     def write_meta_data(self):
+        if not is_world_process_zero():
+            return
+
         gpu_info = gpu_utils.get_cuda_info()
         if len(gpu_info) != 0:
             # log_obj = {f"gpus_info/#{i}/": gi for i, gi in enumerate(gpu_info)}
@@ -315,7 +234,7 @@ class Seq2SeqRuntime(Runtime):
     @property
     def logger(self) -> Run:
         if not hasattr(self, "_logger"):
-            if wandb.run is None:
+            if wandb.run is None and is_world_process_zero():
                 if self.debug_mode:
                     mode = "disabled"
                 elif self.force_offline:
@@ -477,13 +396,15 @@ class Seq2SeqRuntime(Runtime):
                 "######################################\n"
             )
 
-            self.logger.summary.update(
-                {
-                    "num_trainable_params": trainable_parameters,
-                    "num_non_trainable_params": total_parameters - trainable_parameters,
-                    "num_total_params": total_parameters,
-                },
-            )
+            if is_world_process_zero():
+                self.logger.summary.update(
+                    {
+                        "num_trainable_params": trainable_parameters,
+                        "num_non_trainable_params": total_parameters
+                        - trainable_parameters,
+                        "num_total_params": total_parameters,
+                    },
+                )
 
         except Exception as exp:
             logger.warning("Couldn't log the number of parameters because of ")
@@ -492,6 +413,9 @@ class Seq2SeqRuntime(Runtime):
     def log_metrics_to_console(
         self, split: str = "None", metrics: Dict[str, Any] = None
     ):
+        if not is_world_process_zero():
+            return
+
         if metrics is None:
             return
 
@@ -579,12 +503,10 @@ class Seq2SeqRuntime(Runtime):
         trainer.save_model()
 
         metrics = train_result.metrics
-        if isinstance(train_dataset, Sized):
+        if isinstance(train_dataset, Sized) and trainer.is_world_process_zero():
             metrics["num_train_samples"] = len(trainer.train_dataset)
             self.logger.summary.update(
-                {
-                    "num_train_samples": len(trainer.train_dataset),
-                }
+                {"num_train_samples": len(trainer.train_dataset)}
             )
 
         self.log_metrics_to_console("train", metrics)
@@ -623,7 +545,7 @@ class Seq2SeqRuntime(Runtime):
         metrics = trainer.evaluate(
             eval_dataset=dataset, metric_key_prefix=f"eval_{split}"
         )
-        if isinstance(dataset, Sized):
+        if isinstance(dataset, Sized) and trainer.is_world_process_zero():
             metrics[f"eval_{split}_num_samples"] = len(dataset)
             self.logger.summary.update({f"eval_{split}_num_samples": len(dataset)})
 
@@ -706,6 +628,9 @@ class Seq2SeqRuntime(Runtime):
         self.evaluate(test_split, load_best=load_best)
 
     def combine_pred(self, split: str = "test"):
+        if not is_world_process_zero():
+            return
+
         logger.info(f"*** Combing predictions on split: {split} ***")
 
         prediction_path = self.exp_root / f"pred_out_{split}.jsonl"
@@ -782,6 +707,9 @@ class Seq2SeqRuntime(Runtime):
         self.analyze_all(load_best=load_best, split=eval_split)
 
     def analyze(self, config_filenames: str, load_best: bool = True):
+        if not is_world_process_zero():
+            return
+
         config_filenames = [fn.strip() for fn in config_filenames.split(",")]
         config_obj = py_utils.load_jsonnet_config(config_filenames)
 
@@ -818,6 +746,9 @@ class Seq2SeqRuntime(Runtime):
         analyzer.analyze()
 
     def analyze_all(self, load_best: bool = True, split: str = "test"):
+        if not is_world_process_zero():
+            return
+
         if self.analyzers is None:
             logger.warning("self.analyzers is None. Exiting...")
             return

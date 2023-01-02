@@ -17,6 +17,11 @@ os.environ[wandb_env.SILENT] = "true"
 os.environ[wandb_env.DISABLE_CODE] = "true"
 
 
+LOAD_GPU_COUNTS_TO_VAR = """
+NUM_GPUS=$(nvidia-smi -L | wc -l)
+"""
+
+
 def maybe_add_post_script(args) -> str:
     if args is not None and args.post_script is not None:
         post_script = args.post_script
@@ -24,6 +29,32 @@ def maybe_add_post_script(args) -> str:
         script += f"{post_script}\n"
         return script
     return ""
+
+
+def use_torch_distributed(args: argparse.Namespace = None) -> bool:
+    return (
+        args is not None
+        and "use_torch_distributed" in args
+        and args.use_torch_distributed
+    )
+
+
+def command_to_bash_str(
+    cmd: str, configs_str: str, prefix: str = "", args: argparse.Namespace = None
+) -> str:
+    cmd = cmd.strip()
+    # Currently torch distributed is only supported for train and hp_step
+    if use_torch_distributed(args) and cmd in ["train", "hp_step"]:
+        script = (
+            f"{prefix}torchrun --standalone --nnodes=1 --nproc_per_node=$NUM_GPUS \\\n"
+        )
+        script += f"{prefix}\tsrc/main.py --configs '{configs_str}' \\\n"
+        script += f"{prefix}\t\t{cmd}\n\n"
+    else:
+        script = f"{prefix}python src/main.py --configs '{configs_str}' \\\n"
+        script += f"{prefix}\t{cmd}\n\n"
+
+    return script
 
 
 def make_run_script(
@@ -44,14 +75,15 @@ def make_run_script(
     script += f"export WANDB_RUN_ID={exp_key}\n"
     script += f"export APP_EXPERIMENT_NAME={exp_name}\n"
 
+    if use_torch_distributed(args):
+        script += LOAD_GPU_COUNTS_TO_VAR
+
     script = add_python_paths(script)
 
     configs_str = configs
     script += "\n\n"
     for c in commands.split(","):
-        c = c.strip()
-        script += f"python src/main.py --configs '{configs_str}' \\\n"
-        script += f"       {c}\n\n"
+        script += command_to_bash_str(c, configs_str, prefix="", args=args)
 
     script += maybe_add_post_script(args)
 
@@ -106,6 +138,9 @@ def make_run_script_seeds(
     script += f"export ORIG_APP_EXPERIMENT_NAME={exp_name}\n"
     script += f"export ORIG_WANDB_RUN_ID={exp_key}\n"
 
+    if use_torch_distributed(args):
+        script += LOAD_GPU_COUNTS_TO_VAR
+
     script = add_python_paths(script)
     script += "\n\n"
 
@@ -118,9 +153,7 @@ def make_run_script_seeds(
     script += f"\texport WANDB_RUN_ID={exp_key}_seed_$SEED\n\n"
 
     for c in commands.split(","):
-        c = c.strip()
-        script += f"\tpython src/main.py --configs '{configs_str}' \\\n"
-        script += f"\t       {c}\n\n"
+        script += command_to_bash_str(c, configs_str, prefix="\t", args=args)
 
     script += "done\n"
 
@@ -145,15 +178,17 @@ def make_run_script_sweep_job(
     exp_key: str,
     exp_name: str,
     seeds: int,
+    args=None,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
     script += "\nexport WANDB_JOB_TYPE=hp_exp\n\n\n"
 
+    if use_torch_distributed(args):
+        script += LOAD_GPU_COUNTS_TO_VAR
+
     configs_str = configs
     for c in commands.split(","):
-        c = c.strip()
-        script += f"python src/main.py --configs '{configs_str}' \\\n"
-        script += f"       {c}\n\n"
+        script += command_to_bash_str(c, configs_str, prefix="", args=args)
 
     script += '\necho "Experiment finished!"\n'
 
@@ -257,7 +292,6 @@ def main(args: argparse.Namespace):
     entity: str = args.entity
     configs: str = args.configs
 
-
     exp_name = get_exp_name(configs)
 
     if args.dataset is not None:
@@ -273,6 +307,16 @@ def main(args: argparse.Namespace):
     if args.output_only_name:
         print(exp_name)
         return
+
+    if args.post_script:
+        post_script_path = Path(args.post_script)
+        if use_torch_distributed(args):
+            distributed_post_script_path = (
+                post_script_path.parent / f"distributed_{post_script_path.name}"
+            )
+            if distributed_post_script_path.exists():
+                post_script_path = distributed_post_script_path
+        args.post_script = str(post_script_path)
 
     print("# ----> 1. Generating a unique experiment name...")
 
@@ -348,6 +392,7 @@ def main(args: argparse.Namespace):
             run_id,
             exp_name,
             args.sweep_id,
+            args=args,
         )
     else:
         run_script_path = make_run_script(
@@ -502,6 +547,13 @@ if __name__ == "__main__":
         "--output_only_name",
         action="store_true",
         help="Print only the name of the experiment",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--use_torch_distributed",
+        action="store_true",
+        help="Use torch.distributed.launch",
         default=False,
     )
 
