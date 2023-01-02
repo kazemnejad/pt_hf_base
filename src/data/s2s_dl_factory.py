@@ -457,7 +457,7 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
             stats_ds = ds.map(compute_stat, num_proc=4)
 
             for k in ["input_ids", "labels"]:
-                if f"{k}_len" not in stats_ds:
+                if f"{k}_len" not in stats_ds.column_names:
                     continue
 
                 len_values = np.array(stats_ds[f"{k}_len"])
