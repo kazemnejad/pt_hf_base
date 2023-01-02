@@ -22,6 +22,7 @@ from transformers import (
 from common import ExperimentStage, JsonDict
 from common import Lazy, Params
 from common.py_utils import chunks
+from common.torch_utils import is_world_process_zero
 from data.base_dl_factory import DataLoaderFactory
 from tokenization_utils import SpecialTokens, Tokenizer
 
@@ -407,6 +408,85 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
 
         if wandb.run is not None:
             wandb.log({f"ds_examples/{name}": table})
+
+        if is_world_process_zero():
+            logger.info(f"Dataset examples for {name}:")
+            logger.info("---------------------------------")
+            logger.info(f"len: {len(ds)}")
+            idx = 0
+            input_ids = [tid for tid in examples["input_ids"][idx] if tid >= 0]
+            labels = [tid for tid in examples["labels"][idx] if tid >= 0]
+            if self.source_seq_key in examples:
+                src = examples[self.source_seq_key][idx]
+            else:
+                src = ""
+
+            if self.target_seq_key in examples:
+                tgt = examples[self.target_seq_key][idx]
+            else:
+                tgt = ""
+
+            decoded_input_ids = self.tokenizer.decode(input_ids)
+            input_id_tokens = [
+                self.tokenizer.convert_ids_to_tokens(tid) if tid >= 0 else str(tid)
+                for tid in examples["input_ids"][idx]
+            ]
+            decoded_labels = self.tokenizer.decode(labels)
+            label_tokens = [
+                self.tokenizer.convert_ids_to_tokens(tid) if tid >= 0 else str(tid)
+                for tid in examples["labels"][idx]
+            ]
+
+            logger.info(f"indices: {idx}\n")
+            logger.info(f"input_ids: {decoded_input_ids}\n")
+            logger.info(f"labels: {decoded_labels}\n")
+            logger.info(f"input_id_tokens: {', '.join(input_id_tokens)}\n")
+            logger.info(f"label_tokens: {', '.join(label_tokens)}\n")
+            logger.info(f"src: {src}\n")
+            logger.info(f"tgt: {tgt}\n")
+
+            # Log some dataset stats to the console
+            stats: Dict[str, Dataset] = {}
+            if "input_ids" in ds.column_names:
+                input_len_ds = ds.map(
+                    lambda x: {"input_ids_len": len(x["input_ids"])}, num_proc=4
+                )
+                stats["input_ids"] = input_len_ds
+
+            if "labels" in ds.column_names:
+                label_len_ds = ds.map(
+                    lambda x: {"labels_len": len(x["labels"])}, num_proc=4
+                )
+                stats["labels"] = label_len_ds
+
+            for k, len_ds in stats.items():
+                len_values = np.array(len_ds[f"{k}_len"])
+                mean = np.mean(len_values)
+                std = np.std(len_values)
+                the_min = np.min(len_values)
+                the_max = np.max(len_values)
+
+                logger.info(
+                    f"Dataset {name} stats: {k}: "
+                    f"Mean: {mean}, "
+                    f"Std: {std}, "
+                    f"Min: {the_min}, "
+                    f"Max: {the_max}"
+                )
+
+                if wandb.run is not None:
+                    wandb.log(
+                        {
+                            f"ds_stats/{name}/{k}": {
+                                "mean": mean,
+                                "std": std,
+                                "min": the_min,
+                                "max": the_max,
+                            }
+                        }
+                    )
+
+            logger.info("---------------------------------")
 
     @overrides
     def transform_line_to_instance(self, line: str, stage: ExperimentStage) -> Any:
