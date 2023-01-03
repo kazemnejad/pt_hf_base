@@ -38,6 +38,8 @@ def is_run_complete(run: wandb.apis.public.Run) -> bool:
     ):
         return False
 
+    return True
+
 
 def get_param(
     run: wandb.apis.public.Run, params: List[Dict[str, Any]]
@@ -69,8 +71,9 @@ def main():
     )
 
     try:
-        sweep = api.sweep(f"{get_entity_name()}/{get_project_name}/{sweep_id}")
+        sweep = api.sweep(f"{get_entity_name()}/{get_project_name()}/{sweep_id}")
     except Exception as e:
+        print(f"Failed to get sweep: {e}")
         exit(1)
 
     sweep_params_dict = {p: v["values"] for p, v in sweep.config["parameters"].items()}
@@ -80,9 +83,7 @@ def main():
     ]
     sweep_params_keys = sorted(keys)
 
-    def get_param_hash(
-        params: Dict[str, Any], sweep_params_keys: List[str]
-    ) -> Tuple[Any, ...]:
+    def get_param_hash(params: Dict[str, Any]) -> Tuple[Any, ...]:
         return tuple(params[k] for k in sweep_params_keys)
 
     run_groups: Dict[Tuple[Any, ...], List[wandb.apis.public.Run]] = defaultdict(list)
@@ -91,12 +92,22 @@ def main():
         if run_param is None:
             continue
 
-        run_groups[get_param_hash(run_param, sweep_params_keys)].append(run)
+        run_groups[get_param_hash(run_param)].append(run)
 
-    for param_hash, runs in run_groups.items():
-        is_group_complete = any(is_run_complete(run) for run in runs)
+    for sweep_param in sweep_params:
+        param_hash = get_param_hash(sweep_param)
+        if len(run_groups[param_hash]) == 0:
+            print(f"Failed to find run for {sweep_param}")
+            exit(1)
+
+        is_group_complete = False
+        for run in run_groups[param_hash]:
+            if is_run_complete(run):
+                is_group_complete = True
+                break
+
         if not is_group_complete:
-            print(f"Error: Sweep group {param_hash} is not complete")
+            print(f"No run is complete for {sweep_param}")
             exit(1)
 
 
