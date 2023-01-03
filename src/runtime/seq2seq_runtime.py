@@ -17,7 +17,6 @@ from tqdm import tqdm
 from transformers import (
     set_seed,
     Seq2SeqTrainer,
-    Seq2SeqTrainingArguments,
     WEIGHTS_NAME,
     ProgressCallback,
     EarlyStoppingCallback,
@@ -35,7 +34,7 @@ from common.torch_utils import is_world_process_zero
 from hp_search_space import HPSearchSpace
 from runtime.base_runtime import Runtime
 from tokenization_utils import Tokenizer
-from trainers import BaseTrainer
+from trainers import BaseTrainer, CustomTrainingArguments
 
 transformers.logging.set_verbosity_info()
 
@@ -353,7 +352,7 @@ class Seq2SeqRuntime(Runtime):
         trainer_type = training_args.pop("type", BaseTrainer.default_implementation)
         trainer_class = BaseTrainer.resolve_class_name(trainer_type)[0]
 
-        training_args = Seq2SeqTrainingArguments(**training_args)
+        training_args = CustomTrainingArguments(**training_args)
 
         data_collator = self.dl_factory.get_collate_fn(stage)
         if stage == ExperimentStage.TRAINING:
