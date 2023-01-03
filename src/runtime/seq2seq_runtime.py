@@ -89,6 +89,8 @@ class CustomWandbCallback(WandbCallback):
         if self._wandb is None:
             return
         if state.is_world_process_zero:
+            if self._wandb.run is None:
+                return
             if not self._initialized:
                 self.setup(args, state, model)
             logs = self.rewrite_logs(logs)
@@ -433,7 +435,7 @@ class Seq2SeqRuntime(Runtime):
 
         logger.info(log_str)
 
-    def _load_last_checkpoint(self, trainer: Seq2SeqTrainer):
+    def _load_last_checkpoint(self, trainer: Seq2SeqTrainer) -> Optional[str]:
         last_checkpoint = self.get_last_checkpoint_path()
         if last_checkpoint is not None:
             logger.info(f"Loading checkpoints from {last_checkpoint}")
@@ -442,7 +444,9 @@ class Seq2SeqRuntime(Runtime):
         else:
             logger.info(f"Initializing model from scratch")
 
-    def _load_best_checkpoint(self, trainer):
+        return last_checkpoint
+
+    def _load_best_checkpoint(self, trainer) -> str:
         ckpt_dir = self.exp_root / "checkpoints"
         last_checkpoint = self.get_last_checkpoint_path()
         if (ckpt_dir / "trainer_state.json").exists():
@@ -466,6 +470,8 @@ class Seq2SeqRuntime(Runtime):
             Path(best_model_checkpoint) / WEIGHTS_NAME, map_location="cpu"
         )
         trainer._load_state_dict_in_model(state_dict)
+
+        return best_model_checkpoint
 
     def train(self, eval_split: str = "valid", train_split: str = "train"):
         logger.info(f"*** Training ***")
@@ -568,13 +574,26 @@ class Seq2SeqRuntime(Runtime):
         trainer = self.create_trainer(ExperimentStage.PREDICTION)
         if load_best:
             try:
-                self._load_best_checkpoint(trainer)
+                best_ckpt_path = self._load_best_checkpoint(trainer)
+                if trainer.is_world_process_zero():
+                    self.logger.summary.update(
+                        {f"predict_{split}_ckpt_path": f"best at {best_ckpt_path}"}
+                    )
             except:
                 logger.info("Loading last checkpoint...")
-                self._load_last_checkpoint(trainer)
+                last_ckpt_path = self._load_last_checkpoint(trainer)
+                if trainer.is_world_process_zero():
+                    self.logger.summary.update(
+                        {f"predict_{split}_ckpt_path": f"last at {last_ckpt_path}"}
+                    )
         else:
             logger.info("Loading last checkpoint...")
             self._load_last_checkpoint(trainer)
+            last_ckpt_path = self._load_last_checkpoint(trainer)
+            if trainer.is_world_process_zero():
+                self.logger.summary.update(
+                    {f"predict_{split}_ckpt_path": f"last at {last_ckpt_path}"}
+                )
 
         stage = ExperimentStage.PREDICTION
         ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(split))
@@ -728,13 +747,26 @@ class Seq2SeqRuntime(Runtime):
         trainer = self.create_trainer(ExperimentStage.PREDICTION)
         if load_best:
             try:
-                self._load_best_checkpoint(trainer)
+                best_ckpt_path = self._load_best_checkpoint(trainer)
+                if trainer.is_world_process_zero():
+                    self.logger.summary.update(
+                        {f"analyze_ckpt_path": f"best at {best_ckpt_path}"}
+                    )
             except:
                 logger.info("Loading last checkpoint...")
-                self._load_last_checkpoint(trainer)
+                last_ckpt_path = self._load_last_checkpoint(trainer)
+                if trainer.is_world_process_zero():
+                    self.logger.summary.update(
+                        {f"analyze_ckpt_path": f"last at {last_ckpt_path}"}
+                    )
         else:
             logger.info("Loading last checkpoint...")
             self._load_last_checkpoint(trainer)
+            last_ckpt_path = self._load_last_checkpoint(trainer)
+            if trainer.is_world_process_zero():
+                self.logger.summary.update(
+                    {f"analyze_ckpt_path": f"last at {last_ckpt_path}"}
+                )
 
         analyzer = Analyzer.from_params(
             Params(config_obj),
@@ -766,13 +798,26 @@ class Seq2SeqRuntime(Runtime):
         trainer = self.create_trainer(ExperimentStage.PREDICTION)
         if load_best:
             try:
-                self._load_best_checkpoint(trainer)
+                best_ckpt_path = self._load_best_checkpoint(trainer)
+                if trainer.is_world_process_zero():
+                    self.logger.summary.update(
+                        {f"analyze_all_{split}_ckpt_path": f"best at {best_ckpt_path}"}
+                    )
             except:
                 logger.info("Loading last checkpoint...")
-                self._load_last_checkpoint(trainer)
+                last_ckpt_path = self._load_last_checkpoint(trainer)
+                if trainer.is_world_process_zero():
+                    self.logger.summary.update(
+                        {f"analyze_all_{split}_ckpt_path": f"last at {last_ckpt_path}"}
+                    )
         else:
             logger.info("Loading last checkpoint...")
             self._load_last_checkpoint(trainer)
+            last_ckpt_path = self._load_last_checkpoint(trainer)
+            if trainer.is_world_process_zero():
+                self.logger.summary.update(
+                    {f"analyze_all_{split}_ckpt_path": f"last at {last_ckpt_path}"}
+                )
 
         for config_obj in self.analyzers:
             analyzer = Analyzer.from_params(
