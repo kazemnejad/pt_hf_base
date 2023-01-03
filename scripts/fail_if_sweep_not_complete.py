@@ -23,9 +23,14 @@ def get_project_name() -> str:
 
 def is_run_complete(run: wandb.apis.public.Run) -> bool:
     # Assert training is done
-    max_steps = run.config["trainer"]["max_steps"]
+    try:
+        max_steps = run.config["trainer"]["max_steps"]
+    except Exception as e:
+        return False
 
     h = run.history(samples=500, keys=["train/loss"], x_axis="train/global_step")
+    if h is None or len(h) == 0:
+        return False
     last_step = h.iloc[-1]["train/global_step"]
 
     if abs(last_step - max_steps) > 0.01 * max_steps:
