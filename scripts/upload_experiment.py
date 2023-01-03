@@ -21,6 +21,13 @@ LOAD_GPU_COUNTS_TO_VAR = """
 NUM_GPUS=$(nvidia-smi -L | wc -l)
 """
 
+FAIL_IF_SWEEP_NOT_COMPLETE = """
+python scripts/fail_if_sweep_not_complete.py
+if [ $? -ne 0 ]; then
+  echo "Python script failed with exit code $?"
+  exit 1
+fi
+"""
 
 def maybe_add_post_script(args) -> str:
     if args is not None and args.post_script is not None:
@@ -234,7 +241,11 @@ def make_run_script_sweep_agent(
     script += f"\nchmod a+x ./job.sh\n"
     script += f"wandb agent {sweep_id}\n"
 
-    script += maybe_add_post_script(args)
+    post_script = maybe_add_post_script(args)
+    if post_script != "":
+        script += FAIL_IF_SWEEP_NOT_COMPLETE
+        script += post_script
+
     script += '\necho "Experiment finished!"\n'
 
     tmp_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
