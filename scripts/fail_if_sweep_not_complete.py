@@ -71,7 +71,13 @@ def main():
     )
 
     try:
-        sweep = api.sweep(f"{get_entity_name()}/{get_project_name()}/{sweep_id}")
+        sweep_id_parts = sweep_id.split("/")
+        if len(sweep_id_parts) == 1:
+            sweep = api.sweep(f"{get_entity_name()}/{get_project_name()}/{sweep_id}")
+        elif len(sweep_id_parts) == 2:
+            sweep = api.sweep(f"{get_entity_name()}/{sweep_id}")
+        else:
+            sweep = api.sweep(sweep_id)
     except Exception as e:
         print(f"Failed to get sweep: {e}")
         exit(1)
