@@ -65,6 +65,9 @@ class CustomWandbCallback(WandbCallback):
         self._initialized = True
         if state.is_world_process_zero:
             # define default x-axis (for latest wandb versions)
+            if self._wandb.run is None:
+                return
+
             if getattr(self._wandb, "define_metric", None):
                 self._wandb.define_metric("train/global_step")
                 self._wandb.define_metric(
@@ -85,9 +88,9 @@ class CustomWandbCallback(WandbCallback):
     def on_log(self, args, state, control, model=None, logs=None, **kwargs):
         if self._wandb is None:
             return
-        if not self._initialized:
-            self.setup(args, state, model)
         if state.is_world_process_zero:
+            if not self._initialized:
+                self.setup(args, state, model)
             logs = self.rewrite_logs(logs)
             self._wandb.log({**logs, "train/global_step": state.global_step})
 
@@ -582,13 +585,14 @@ class Seq2SeqRuntime(Runtime):
 
         test_results = trainer.predict(dataset, metric_key_prefix=f"pred_{split}")
 
-        metrics = test_results.metrics
-        metrics[f"pred_{split}_num_samples"] = len(dataset)
-        self.log_metrics_to_console(f"pred_{split}", metrics)
-        trainer.save_metrics(f"pred_{split}", metrics)
-        trainer.log(metrics)
-
         if trainer.is_world_process_zero():
+            metrics = test_results.metrics
+            metrics[f"pred_{split}_num_samples"] = len(dataset)
+            self.log_metrics_to_console(f"pred_{split}", metrics)
+
+            trainer.save_metrics(f"pred_{split}", metrics)
+            trainer.log(metrics)
+
             preds = test_results.predictions
             if isinstance(test_results.predictions, tuple):
                 preds = preds[0]
