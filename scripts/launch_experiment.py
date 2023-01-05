@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from shutil import which
+from typing import List, Tuple
 
 VENV_PATH = "~/RUN_EXP_PY_ENV"
 SLURM_PYTHON_MODULE_NAME = "python/3"
@@ -136,16 +137,19 @@ def is_tool(name):
 
 def install_requirements(args: argparse.Namespace):
     if args.install_notify:
-        if is_tool("notify"): return
+        if is_tool("notify"):
+            return
         if args.notify_webhook_key is None or args.notify_event_name is None:
             raise ValueError("notify-webhook-key or notify-event-name is not provided]")
 
         script_path = Path("notify")
         with open(script_path, "w") as f:
-            f.write(NOTIFY_SCRIPT.format(
-                webhook_key=args.notify_webhook_key,
-                event_name=args.notify_event_name
-            ))
+            f.write(
+                NOTIFY_SCRIPT.format(
+                    webhook_key=args.notify_webhook_key,
+                    event_name=args.notify_event_name,
+                )
+            )
 
         make_executable(script_path)
 
@@ -173,14 +177,18 @@ def install_requirements(args: argparse.Namespace):
 def run_on_slurm(args: argparse.Namespace):
     install_requirements(args)
 
-    args.long_term_storage = replace_env_vars(str(Path(args.long_term_storage).expanduser()))
+    args.long_term_storage = replace_env_vars(
+        str(Path(args.long_term_storage).expanduser())
+    )
     args.log_dir = replace_env_vars(str(Path(args.log_dir).expanduser()))
     args.script_dir = replace_env_vars(str(Path(args.script_dir).expanduser()))
 
     (Path(args.log_dir) / args.bundle).mkdir(parents=True, exist_ok=True)
     Path(args.script_dir).mkdir(parents=True, exist_ok=True)
 
-    tmp_node_storage = Path(args.long_term_storage) / next(tempfile._get_candidate_names())
+    tmp_node_storage = Path(args.long_term_storage) / next(
+        tempfile._get_candidate_names()
+    )
     tmp_node_storage.mkdir(parents=True, exist_ok=True)
 
     wrapper_script = "#!/bin/bash \n\n"
@@ -197,26 +205,22 @@ def run_on_slurm(args: argparse.Namespace):
     #     node_storage=tmp_node_storage
     # )
 
-    wrapper_script += PARTIAL_EXPORT_EXP_NAME.format(
-        node_storage=tmp_node_storage
-    )
+    wrapper_script += PARTIAL_EXPORT_EXP_NAME.format(node_storage=tmp_node_storage)
 
     wrapper_script += PARTIAL_PREPARE_EXP_DIR.format(
         long_term_storage=args.long_term_storage,
         bundle_id=args.bundle,
         node_storage=tmp_node_storage,
-        log_dir=str(Path(args.log_dir).expanduser())
+        log_dir=str(Path(args.log_dir).expanduser()),
     )
 
-    wrapper_script += PARTIAL_COPY_CREDENTIALS.format(
-        node_storage=tmp_node_storage
-    )
+    wrapper_script += PARTIAL_COPY_CREDENTIALS.format(node_storage=tmp_node_storage)
 
     if args.assets is not None and len(args.assets) > 0:
         wrapper_script += PARTIAL_COPY_ASSETS.format(
             long_term_storage=args.long_term_storage,
             node_storage=tmp_node_storage,
-            assets_name=args.assets
+            assets_name=args.assets,
         )
 
     # if (not args.interactive or args.tb_on_interactive) and args.platform != "cc":
@@ -225,27 +229,26 @@ def run_on_slurm(args: argparse.Namespace):
     compute_script = PARTIAL_HEADER.format(
         log_dir=str(Path(args.log_dir).expanduser()),
         sbatch_account=args.sbatch_account,
-        bundle_id=args.bundle
+        bundle_id=args.bundle,
     )
 
     if args.env and args.env != "":
-        env_vars = list(map(lambda x: x.strip(), args.env.split(',')))
+        env_vars = list(map(lambda x: x.strip(), args.env.split(",")))
         for ev in env_vars:
-            if len(ev) == 0: continue
+            if len(ev) == 0:
+                continue
             compute_script += f"export {ev}\n"
 
     compute_script += "\nsleep 5 \n"
 
     compute_script += PARTIAL_COPY_TMP_TO_NODE_STORAGE.format(
-        node_storage=args.node_storage,
-        tmp_dir=tmp_node_storage
+        node_storage=args.node_storage, tmp_dir=tmp_node_storage
     )
 
     if args.image is None:
         args.image = "deepl-tf_v0.1.sif"
     compute_script += PARTIAL_CNTR_INIT_SINGULARITY.format(
-        image_path=f"{args.images_dir}/{args.image}",
-        node_storage=args.node_storage
+        image_path=f"{args.images_dir}/{args.image}", node_storage=args.node_storage
     )
 
     wrapper_path = Path(args.script_dir).expanduser() / f"{args.bundle}_wrapper.sh"
@@ -256,22 +259,26 @@ def run_on_slurm(args: argparse.Namespace):
             singularity_module_name=SLURM_SINGULARITY_MODULE_NAME,
             node_storage=args.node_storage,
             long_term_storage=args.long_term_storage,
-            image=args.image
+            image=args.image,
         )
 
-        wrapper_script += 'printf "\\n\\n--------------------------------------------------\\n"; \n'
-        wrapper_script += 'printf "Run the following command once the job is granted:\\n"; \n'
+        wrapper_script += (
+            'printf "\\n\\n--------------------------------------------------\\n"; \n'
+        )
+        wrapper_script += (
+            'printf "Run the following command once the job is granted:\\n"; \n'
+        )
         wrapper_script += f'echo "$ {compute_path}";\n'
-        wrapper_script += 'echo "--------------------------------------------------"; \n'
+        wrapper_script += (
+            'echo "--------------------------------------------------"; \n'
+        )
 
         account_str = f"--account={args.account}" if args.account else ""
         if args.platform == "ava":
             wrapper_script += f"srun --pty {args.slurm_args} {account_str} zsh\n"
         else:
             wrapper_script += f"salloc {args.slurm_args} {account_str} \n"
-        wrapper_script += PARTIAL_CLEAN_UP.format(
-            tmp_dir=tmp_node_storage
-        )
+        wrapper_script += PARTIAL_CLEAN_UP.format(tmp_dir=tmp_node_storage)
 
         save_and_make_executable(wrapper_path, wrapper_script)
         save_and_make_executable(compute_path, compute_script)
@@ -283,7 +290,7 @@ def run_on_slurm(args: argparse.Namespace):
             node_storage=args.node_storage,
             long_term_storage=args.long_term_storage,
             image=args.image,
-            bundle_id=args.bundle
+            bundle_id=args.bundle,
         )
 
         wrapper_script += f"sbatch -W {args.slurm_args} {compute_path} \n"
@@ -294,9 +301,7 @@ def run_on_slurm(args: argparse.Namespace):
         #     long_term_storage=args.long_term_storage,
         #     bundle_id=args.bundle,
         # )
-        wrapper_script += PARTIAL_CLEAN_UP.format(
-            tmp_dir=tmp_node_storage
-        )
+        wrapper_script += PARTIAL_CLEAN_UP.format(tmp_dir=tmp_node_storage)
 
         save_and_make_executable(wrapper_path, wrapper_script)
         save_and_make_executable(compute_path, compute_script)
@@ -307,12 +312,13 @@ def run_on_slurm(args: argparse.Namespace):
 
         log_path = Path(args.log_dir).expanduser() / args.bundle / "runner.txt"
         log_file = open(log_path, "w")
-        subprocess.Popen([wrapper_path], start_new_session=True,
-                         stdout=log_file, stderr=log_file)
+        subprocess.Popen(
+            [wrapper_path], start_new_session=True, stdout=log_file, stderr=log_file
+        )
 
 
 def save_and_make_executable(job_path, script):
-    with open(job_path, 'w') as f:
+    with open(job_path, "w") as f:
         f.write(script)
     make_executable(job_path)
 
@@ -343,25 +349,29 @@ def run_on_ava(args: argparse.Namespace):
     # args.node_storage = "/home/shivag5/Documents/research/comp-gen/comp-gen-nlp/slurm_experiments"
     # args.long_term_storage = "/home/shivag5/Documents/research/comp-gen/comp-gen-nlp/slurm_experiments"
     args.sbatch_account = ""
-    args.slurm_args = '-p ava_s.p ' + args.slurm_args
+    args.slurm_args = "-p ava_s.p " + args.slurm_args
     run_on_slurm(args)
 
 
 def run_on_cl(args):
     exp_bundle = args.bundle
-    dependencies = f"data:{exp_bundle}/data " + \
-                   f"configs:{exp_bundle}/configs " + \
-                   f"scripts:{exp_bundle}/scripts " + \
-                   f"src:{exp_bundle}/src run.sh:{exp_bundle}/run.sh " + \
-                   f"metadata.json:{exp_bundle}/metadata.json " + \
-                   f"cl_run.sh:cl_run"
+    dependencies = (
+        f"data:{exp_bundle}/data "
+        + f"configs:{exp_bundle}/configs "
+        + f"scripts:{exp_bundle}/scripts "
+        + f"src:{exp_bundle}/src run.sh:{exp_bundle}/run.sh "
+        + f"metadata.json:{exp_bundle}/metadata.json "
+        + f"cl_run.sh:cl_run"
+    )
 
     docker_image = f"--request-docker-image {args.image}" if args.image else ""
-    cmd = f'cl run --tags result --allow-failed-dependencies --exclude-patterns experiments ' + \
-          f'{docker_image} {args.cl_args} {dependencies} "sh cl_run.sh"'
+    cmd = (
+        f"cl run --tags result --allow-failed-dependencies --exclude-patterns experiments "
+        + f'{docker_image} {args.cl_args} {dependencies} "sh cl_run.sh"'
+    )
 
     out = subprocess.check_output(shlex.split(cmd))
-    out = out.decode('utf8')
+    out = out.decode("utf8")
     print("Done!")
     print(f"Check here https://worksheets.codalab.org/bundles/{out}")
 
@@ -372,16 +382,16 @@ def run_on_google_colab(args):
 
 def get_exp_metadata(exp: Path):
     metadata = {}
-    file_path = exp / 'metadata.json'
+    file_path = exp / "metadata.json"
     if file_path.exists():
         with open(file_path) as f:
             metadata = json.load(f)
 
-    file_path = exp / 'cl_metadata.json'
+    file_path = exp / "cl_metadata.json"
     if file_path.exists():
         with open(file_path) as f:
             try:
-                metadata['exp_bundle'] = json.load(f)['exp_bundle']
+                metadata["exp_bundle"] = json.load(f)["exp_bundle"]
             except:
                 pass
 
@@ -392,24 +402,24 @@ def list_experiments(args):
     log_dir = Path(args.log_dir).expanduser()
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    experiments = filter(lambda x: x.name.startswith('0x'), Path(log_dir).iterdir())
+    experiments = filter(lambda x: x.name.startswith("0x"), Path(log_dir).iterdir())
     experiments = sorted(experiments, key=os.path.getmtime, reverse=True)
 
-    for i, exp in enumerate(experiments[:args.n]):
+    for i, exp in enumerate(experiments[: args.n]):
         dir_name = exp.name
 
         output_str = f"### {i + 1}. {dir_name} "
-        metadata = get_exp_metadata(exp / 'exp_dir')
-        if 'exp_bundle' in metadata:
-            if metadata['exp_bundle'] == dir_name:
+        metadata = get_exp_metadata(exp / "exp_dir")
+        if "exp_bundle" in metadata:
+            if metadata["exp_bundle"] == dir_name:
                 output_str += "(verified)"
 
         output_str += "\n"
 
-        if 'exp_name' in metadata:
+        if "exp_name" in metadata:
             output_str += f"    name: `{metadata['exp_name']}`\n"
 
-        if 'tb_dev_url' in metadata:
+        if "tb_dev_url" in metadata:
             output_str += f"    tb_dev_url: `{metadata['tb_dev_url']}`\n"
 
         output_str += f"    see logs: $ cd {exp} && ls -lha\n"
@@ -429,9 +439,10 @@ def upload(args):
 
     script += f"cl work {args.codalab_worksheet}\n"
 
-    exps_dir = str(Path(args.long_term_storage).expanduser() / 'experiments')
+    exps_dir = str(Path(args.long_term_storage).expanduser() / "experiments")
 
     import os
+
     for key, value in os.environ.items():
         exps_dir = exps_dir.replace(f"${key}", value)
 
@@ -439,7 +450,7 @@ def upload(args):
     assert exps_dir.exists()
 
     metadata = get_exp_metadata(exps_dir / args.bundle)
-    assert 'exp_name' in metadata
+    assert "exp_name" in metadata
 
     print(f"Uploading {exps_dir / args.bundle}...\n")
     script += f"export EXP_NAME={metadata['exp_name']}\n"
@@ -481,7 +492,7 @@ def upload_on_ava(args: argparse.Namespace):
     args.node_storage = "/extra/ucinlp0/shivag5/comp-gen/comp-gen-nlp"
     args.long_term_storage = "/extra/ucinlp0/shivag5/comp-gen/comp-gen-nlp"
     args.sbatch_account = ""
-    args.slurm_args = '-p ava_s.p ' + args.slurm_args
+    args.slurm_args = "-p ava_s.p " + args.slurm_args
     upload(args)
 
 
@@ -513,7 +524,9 @@ def download_trained_model(args: argparse.Namespace):
     script = "#!/bin/bash \n\n"
     metadata = get_exp_metadata(download_path)
 
-    target_path = str(Path(args.long_term_storage) / 'experiments' / metadata['exp_name'])
+    target_path = str(
+        Path(args.long_term_storage) / "experiments" / metadata["exp_name"]
+    )
     for key, value in os.environ.items():
         target_path = target_path.replace(f"${key}", value)
 
@@ -521,10 +534,12 @@ def download_trained_model(args: argparse.Namespace):
 
     script += f"rsync -avz {download_path}/* {target_path}\n"
 
-    script += "ln -sfn {target_path} {long_term_storage}/experiments/{bundle_id}\n".format(
-        target_path=target_path,
-        long_term_storage=args.long_term_storage,
-        bundle_id=metadata['exp_bundle']
+    script += (
+        "ln -sfn {target_path} {long_term_storage}/experiments/{bundle_id}\n".format(
+            target_path=target_path,
+            long_term_storage=args.long_term_storage,
+            bundle_id=metadata["exp_bundle"],
+        )
     )
 
     script_path = f"{get_tempfile_path()}.sh"
@@ -533,7 +548,7 @@ def download_trained_model(args: argparse.Namespace):
     os.remove(script_path)
     shutil.rmtree(download_path)
 
-    print(f'Path to experiment dir: {target_path}')
+    print(f"Path to experiment dir: {target_path}")
     print(f"This result was created from experiment bundle `{metadata['exp_bundle']}`")
 
 
@@ -562,20 +577,24 @@ def download_trained_model_on_ava(args: argparse.Namespace):
     args.node_storage = "/extra/ucinlp0/shivag5/comp-gen/comp-gen-nlp"
     args.long_term_storage = "/extra/ucinlp0/shivag5/comp-gen/comp-gen-nlp"
     args.sbatch_account = ""
-    args.slurm_args = '-p ava_s.p ' + args.slurm_args
+    args.slurm_args = "-p ava_s.p " + args.slurm_args
     download_trained_model(args)
+
 
 def download_bundle2(exp_key: str, output_dir: Path):
     from comet_ml import ExistingExperiment
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    exp = ExistingExperiment(previous_experiment=args.bundle,
-                             auto_output_logging=False,
-                             auto_metric_logging=False,
-                             auto_metric_step_rate=False,
-                             auto_log_co2=False,
-                             auto_param_logging=False,
-                             display_summary_level=0)
+    exp = ExistingExperiment(
+        previous_experiment=args.bundle,
+        auto_output_logging=False,
+        auto_metric_logging=False,
+        auto_metric_step_rate=False,
+        auto_log_co2=False,
+        auto_param_logging=False,
+        display_summary_level=0,
+    )
 
     artifact_name = f"artf-{exp_key}"
     artifact = exp.get_artifact(artifact_name)
@@ -583,7 +602,10 @@ def download_bundle2(exp_key: str, output_dir: Path):
 
     if len(artifact.remote_assets) > 0:
         from comet_ml.artifacts import LoggedArtifactAsset
-        data_asset: LoggedArtifactAsset = [asset for asset in artifact.remote_assets if asset.logical_path == "data"][0]
+
+        data_asset: LoggedArtifactAsset = [
+            asset for asset in artifact.remote_assets if asset.logical_path == "data"
+        ][0]
         data_artifact = exp.get_artifact(data_asset.link)
         data_dir = output_dir / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -591,10 +613,12 @@ def download_bundle2(exp_key: str, output_dir: Path):
 
     exp.end()
 
+
 def download_bundle(exp_key: str, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     import wandb
+
     project = os.environ.get("WANDB_PROJECT", "comp-gen_v2")
     user = os.environ.get("WANDB_USER", None)
     api = wandb.Api(overrides={"project": project})
@@ -618,7 +642,72 @@ def download_bundle(exp_key: str, output_dir: Path):
         data_artifact.download(str(data_dir))
 
 
+def get_queued_jobs() -> List[Tuple[str, str, str]]:
+    user = os.environ.get("USER")
+    cmd = f"squeue -u {user} -o %A,%j,%T --noheader"
+    output = subprocess.check_output(shlex.split(cmd)).decode("utf-8")
+    jobs = []
+    for line in output.splitlines():
+        job_id, job_name, state = line.split(",")
+        launcher_id = job_name.split("_compute.sh")[0]
+        jobs.append((job_id, launcher_id, state))
+    return jobs
+
+
+def print_info(args: argparse.Namespace):
+    jobs = get_queued_jobs()
+    if len(jobs) == 0:
+        print("No jobs in queue")
+        return
+
+    import wandb
+
+    project = os.environ.get("WANDB_PROJECT", "comp-gen_v2")
+    api = wandb.Api(overrides={"project": project})
+
+    for i, (job_id, launcher_id, state) in enumerate(jobs):
+        print("\n\n----------------------------------------")
+        print(f"{i + 1}: Job {job_id}, LauncherID {launcher_id} is in state {state}")
+        try:
+            launcher_run = api.run(f"{project}/{launcher_id}")
+        except Exception as e:
+            print(f"Error: {e}")
+            continue
+
+        group = launcher_run.group
+        if group is None:
+            continue
+
+        print("\tGroup: ", group)
+        print("\tLink: ", launcher_run.url)
+        is_sweep = launcher_run.job_type == "agent"
+
+        runs = api.runs(
+            f"{project}",
+            {
+                "$and": [
+                    {"group": group},
+                ],
+            },
+        )
+        runs = list(runs)
+        print(f"\tis_sweep: {is_sweep}, #runs: {len(runs)}")
+
+        if is_sweep:
+            sweep_runs = [run for run in runs if run.job_type == "hp_exp"]
+            if len(sweep_runs) == 0:
+                print("\tNo sweep runs")
+                continue
+
+            sweep = sweep_runs[0].sweep
+            print("\tSweep URL: ", sweep.url)
+
+
 def main(args):
+    if args.info:
+        print_info(args)
+        return
+
     if args.bundle is not None:
         if "," not in args.bundle:
             bundles = [args.bundle]
@@ -628,8 +717,26 @@ def main(args):
     else:
         bundles = [None]
 
+    queued_jobs = []
+    if args.nodup:
+        try:
+            queued_jobs = get_queued_jobs()
+            print(f"Queued jobs:")
+            from pprint import pprint
+
+            pprint(queued_jobs)
+        except subprocess.CalledProcessError as e:
+            print("Could not get queued jobs")
+            print(e)
+
+    already_launched = set([job[1] for job in queued_jobs])
+
     print("Bundles:", bundles)
     for bundle in bundles:
+        if args.nodup and bundle in already_launched:
+            print(f"Skipping {bundle} because it is already queued")
+            continue
+
         args.bundle = bundle
 
         if args.list:
@@ -666,132 +773,166 @@ def main(args):
             run_on_cl(args)
 
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Experiment runner")
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Experiment runner')
+    parser.add_argument(
+        "bundle", metavar="EXP_KEY", nargs="?", type=str, help="Experiment Key"
+    )
 
-    parser.add_argument('bundle',
-                        metavar='EXP_KEY',
-                        nargs='?',
-                        type=str,
-                        help='Experiment Key')
+    parser.add_argument(
+        "-p",
+        "--platform",
+        metavar="PLATFORM",
+        type=str,
+        choices=["mila", "cc", "ava", "cl"],
+        default="mila",
+        help="The computation platform we're running the experiment",
+    )
 
-    parser.add_argument('-p',
-                        '--platform',
-                        metavar='PLATFORM',
-                        type=str,
-                        choices=["mila", "cc", "ava", "cl"],
-                        default="mila",
-                        help="The computation platform we're running the experiment")
+    parser.add_argument(
+        "-s",
+        "--slurm-args",
+        metavar="ARGS",
+        type=str,
+        default="--gres=gpu:1",
+        help="Slurm args",
+    )
 
-    parser.add_argument('-s',
-                        '--slurm-args',
-                        metavar='ARGS',
-                        type=str,
-                        default="--gres=gpu:1",
-                        help='Slurm args')
+    parser.add_argument(
+        "-c",
+        "--cl-args",
+        metavar="ARGS",
+        type=str,
+        default="--request-gpus 1",
+        help="Codalab `run` args",
+    )
 
-    parser.add_argument('-c',
-                        '--cl-args',
-                        metavar='ARGS',
-                        type=str,
-                        default="--request-gpus 1",
-                        help='Codalab `run` args')
+    parser.add_argument(
+        "-a",
+        "--assets",
+        metavar="ASSETS",
+        type=str,
+        help="Experiment assets that should be copied to container",
+    )
 
-    parser.add_argument('-a',
-                        '--assets',
-                        metavar='ASSETS',
-                        type=str,
-                        help='Experiment assets that should be copied to container')
+    parser.add_argument(
+        "-w",
+        "--codalab-worksheet",
+        metavar="WORKSHEET",
+        type=str,
+        default="kazemnejad-comp-gen",
+        help="Which codalab worksheet to use",
+    )
 
-    parser.add_argument('-w',
-                        '--codalab-worksheet',
-                        metavar='WORKSHEET',
-                        type=str,
-                        default="kazemnejad-comp-gen",
-                        help='Which codalab worksheet to use')
+    parser.add_argument(
+        "-i", "--image", metavar="IMAGE", type=str, help="Container Image"
+    )
 
-    parser.add_argument('-i',
-                        '--image',
-                        metavar='IMAGE',
-                        type=str,
-                        help='Container Image')
+    parser.add_argument(
+        "--images-dir",
+        metavar="DIR",
+        type=str,
+        default="$HOME/scratch/containers",
+        help="Container Images Directory (only needed for singularity)",
+    )
 
-    parser.add_argument('--images-dir',
-                        metavar='DIR',
-                        type=str,
-                        default="$HOME/scratch/containers",
-                        help='Container Images Directory (only needed for singularity)')
+    parser.add_argument(
+        "--lt-storage",
+        metavar="DIR",
+        type=str,
+        help="Path to platform's long-term storage",
+    )
 
-    parser.add_argument('--lt-storage',
-                        metavar='DIR',
-                        type=str,
-                        help="Path to platform's long-term storage")
+    parser.add_argument(
+        "--node-storage",
+        metavar="DIR",
+        type=str,
+        help="Platform's node storage (short-term)",
+    )
 
-    parser.add_argument('--node-storage',
-                        metavar='DIR',
-                        type=str,
-                        help="Platform's node storage (short-term)")
+    parser.add_argument(
+        "--account",
+        metavar="ACCOUNT",
+        type=str,
+        default=None,
+        help="Slurm account (only needed for CC)",
+    )
 
-    parser.add_argument('--account',
-                        metavar='ACCOUNT',
-                        type=str,
-                        default=None,
-                        help="Slurm account (only needed for CC)")
+    parser.add_argument(
+        "--script-dir",
+        metavar="DIR",
+        type=str,
+        default="~/sbatch_jobs",
+        help="Directory to output generated job scripts",
+    )
 
-    parser.add_argument('--script-dir',
-                        metavar='DIR',
-                        type=str,
-                        default="~/sbatch_jobs",
-                        help="Directory to output generated job scripts")
+    parser.add_argument(
+        "--log-dir",
+        metavar="DIR",
+        type=str,
+        default="~/sbatch_logs",
+        help="Directory to store jobs' log",
+    )
 
-    parser.add_argument('--log-dir',
-                        metavar='DIR',
-                        type=str,
-                        default="~/sbatch_logs",
-                        help="Directory to store jobs' log")
+    parser.add_argument(
+        "--env",
+        metavar="ENVS",
+        type=str,
+        help="Environment variables passed to the container, e.g. X1=V1,x2=V2",
+    )
 
-    parser.add_argument('--env',
-                        metavar='ENVS',
-                        type=str,
-                        help="Environment variables passed to the container, e.g. X1=V1,x2=V2")
+    parser.add_argument(
+        "--interactive", action="store_true", help="Run in the interactive mode"
+    )
 
-    parser.add_argument('--interactive',
-                        action='store_true',
-                        help="Run in the interactive mode")
+    parser.add_argument(
+        "--tb-on-interactive",
+        action="store_true",
+        help="Launch TensorBoard in the interactive mode",
+    )
 
-    parser.add_argument('--tb-on-interactive',
-                        action='store_true',
-                        help="Launch TensorBoard in the interactive mode")
+    parser.add_argument(
+        "--install-notify",
+        action="store_true",
+        help="Install notification program (only to use once)",
+    )
 
-    parser.add_argument('--install-notify',
-                        action='store_true',
-                        help="Install notification program (only to use once)")
+    parser.add_argument("--notify-webhook-key", type=str, help="IFTTT webhook key")
 
-    parser.add_argument('--notify-webhook-key',
-                        type=str,
-                        help="IFTTT webhook key")
+    parser.add_argument("--notify-event-name", type=str, help="IFTTT event name")
 
-    parser.add_argument('--notify-event-name',
-                        type=str,
-                        help="IFTTT event name")
+    parser.add_argument(
+        "--list", action="store_true", help="List all experiments on this platform"
+    )
 
-    parser.add_argument('--list',
-                        action='store_true',
-                        help="List all experiments on this platform")
+    parser.add_argument("-n", type=int, default=10, help="Number of items in the list")
 
-    parser.add_argument('-n',
-                        type=int,
-                        default=10,
-                        help="Number of items in the list")
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload the experiment's results to Codalab",
+    )
 
-    parser.add_argument('--upload',
-                        action='store_true',
-                        help="Upload the experiment's results to Codalab")
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Upload the experiment's results to Codalab",
+    )
 
-    parser.add_argument('--download',
-                        action='store_true',
-                        help="Upload the experiment's results to Codalab")
+    parser.add_argument(
+        "--nodup",
+        action="store_true",
+        help="Do not run already queued the experiment",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--info",
+        action="store_true",
+        help="Print queued experiments' info",
+        default=False,
+    )
 
     args = parser.parse_args()
 
