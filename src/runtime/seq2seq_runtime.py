@@ -184,6 +184,23 @@ class Seq2SeqRuntime(Runtime):
 
         self.training_args = trainer or {}
 
+        if "target_batch_size" in self.training_args:
+            target_batch_size = self.training_args["target_batch_size"]
+            if torch.cuda.is_available():
+                num_devices = torch.cuda.device_count()
+            else:
+                num_devices = 1
+
+            self.training_args["per_device_train_batch_size"] = (
+                target_batch_size // num_devices
+            )
+
+            logger.info(f"Target device batch size: {target_batch_size}")
+            logger.info(f"Number of compute devices: {num_devices}")
+            logger.info(
+                f"Setting per_device_train_batch_size to {self.training_args['per_device_train_batch_size']}"
+            )
+
         seed = self.global_vars["seed"]
         logger.info(f"Setting seed = {seed}")
         set_seed(seed)
@@ -333,9 +350,11 @@ class Seq2SeqRuntime(Runtime):
         model = kwargs.get("model")
         eval_split_name = kwargs.pop("eval_split_name", None)
 
-        training_args = self.training_args
+        training_args = copy.deepcopy(self.training_args)
         training_args["output_dir"] = str(self.exp_root / "checkpoints")
         training_args["report_to"] = "none"
+
+        _ = self.training_args.pop("target_batch_size", None)
 
         if kwargs.get("eval_dataset", None) is None:
             training_args["evaluation_strategy"] = "no"
