@@ -45,6 +45,10 @@ def use_torch_distributed(args: argparse.Namespace = None) -> bool:
         and args.use_torch_distributed
     )
 
+def maybe_set_master_ip_and_address(args: argparse.Namespace = None) -> str:
+    if use_torch_distributed(args):
+        return "\nsource scripts/set_master_ip_and_addr.sh\n"
+    return ""
 
 def command_to_bash_str(
     cmd: str, configs_str: str, prefix: str = "", args: argparse.Namespace = None
@@ -84,6 +88,8 @@ def make_run_script(
 
     if use_torch_distributed(args):
         script += LOAD_GPU_COUNTS_TO_VAR
+
+    script += maybe_set_master_ip_and_address(args)
 
     script = add_python_paths(script)
 
@@ -148,6 +154,8 @@ def make_run_script_seeds(
     if use_torch_distributed(args):
         script += LOAD_GPU_COUNTS_TO_VAR
 
+    script += maybe_set_master_ip_and_address(args)
+
     script = add_python_paths(script)
     script += "\n\n"
 
@@ -192,6 +200,8 @@ def make_run_script_sweep_job(
 
     if use_torch_distributed(args):
         script += LOAD_GPU_COUNTS_TO_VAR
+
+    script += maybe_set_master_ip_and_address(args)
 
     configs_str = configs
     for c in commands.split(","):
