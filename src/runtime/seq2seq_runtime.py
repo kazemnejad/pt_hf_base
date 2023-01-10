@@ -153,6 +153,7 @@ class Seq2SeqRuntime(Runtime):
         config_dict: Optional[Dict[str, Any]] = None,
         sweep_run: Optional[bool] = False,
         analyzers: List[Optional[JsonDict]] = None,
+        auto_compute_batch_size: Optional[bool] = False,
         config_filenames: Optional[List[str]] = None,
         **kwargs,
     ):
@@ -179,6 +180,7 @@ class Seq2SeqRuntime(Runtime):
         self.debug_mode = self.global_vars.get("debug_mode", False)
         self.force_offline = self.global_vars.get("force_offline", False)
         self.config_dict = config_dict
+        self.auto_compute_batch_size = auto_compute_batch_size
 
         self.training_args = trainer or {}
 
@@ -193,7 +195,10 @@ class Seq2SeqRuntime(Runtime):
             assert self.logger is not None
 
         self.dl_factory = self.lazy_dataset.construct(
-            cache_dir=self.cache_dir, log_dir=self.logs_dir
+            cache_dir=self.cache_dir,
+            log_dir=self.logs_dir,
+            debug_mode=self.debug_mode,
+            seed=seed,
         )
         self.write_meta_data()
 
@@ -509,8 +514,54 @@ class Seq2SeqRuntime(Runtime):
         last_checkpoint = self.get_last_checkpoint_path()
         if last_checkpoint is not None:
             logger.info(f"Loading checkpoints from {last_checkpoint}")
+        else:
+            logger.info(f"Initializing training from scratch")
 
-        train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
+        if not self.auto_compute_batch_size:
+            train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
+        else:
+            # Compute the maximum batch size fits into the gpu
+            # and instead increase gradient accumulation steps
+            training_is_done = False
+            orig_training_arg = copy.deepcopy(self.training_args)
+            while not training_is_done:
+                try:
+                    train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
+                    training_is_done = True
+                except RuntimeError as e:
+                    if "out of memory" not in str(e):
+                        raise e
+
+                    # Divide the batch_size in half and increase the accumulation steps
+                    curr_batch_size = self.training_args["per_device_train_batch_size"]
+                    self.training_args["per_device_train_batch_size"] = (
+                        curr_batch_size // 2
+                    )
+                    self.training_args["gradient_accumulation_steps"] = (
+                        self.training_args.get("gradient_accumulation_steps", 1) * 2
+                    )
+
+                    logger.info(
+                        f"Batch size is too large. Reducing it to "
+                        f"{self.training_args['per_device_train_batch_size']} "
+                        f"and increasing gradient accumulation steps to "
+                        f"{self.training_args['gradient_accumulation_steps']}"
+                    )
+
+                    # Empty the cache
+                    torch.cuda.empty_cache()
+
+                    # Recreate the trainer with the new batch size
+                    trainer = self.create_trainer(
+                        ExperimentStage.TRAINING,
+                        model=model,
+                        train_dataset=train_dataset,
+                        eval_dataset=eval_dataset,
+                        eval_split_name=eval_split,
+                    )
+
+            self.training_args = orig_training_arg
+
         trainer.save_model()
 
         metrics = train_result.metrics
