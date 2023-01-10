@@ -249,10 +249,11 @@ class Seq2SeqRuntime(Runtime):
                 f"to {self.training_args['per_device_train_batch_size']}"
             )
 
-            self.logger.summary["computed_per_device_train_batch_size"] = (
-                self.training_args["per_device_train_batch_size"]
-            )
-            self.logger.summary["computed_num_process"] = num_devices
+            if is_world_process_zero():
+                self.logger.summary[
+                    "computed_per_device_train_batch_size"
+                ] = self.training_args["per_device_train_batch_size"]
+                self.logger.summary["computed_num_process"] = num_devices
 
     def write_meta_data(self):
         if not is_world_process_zero():
@@ -566,7 +567,7 @@ class Seq2SeqRuntime(Runtime):
             # Compute the maximum batch size fits into the gpu
             # and instead increase gradient accumulation steps
             training_is_done = False
-            orig_training_arg = copy.deepcopy(self.training_args)
+            orig_training_args = copy.deepcopy(self.training_args)
             while not training_is_done:
                 try:
                     train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
@@ -603,7 +604,15 @@ class Seq2SeqRuntime(Runtime):
                         eval_split_name=eval_split,
                     )
 
-            self.training_args = orig_training_arg
+            if trainer.is_world_process_zero():
+                self.logger.summary["auto_computed_batch_size"] = self.training_args[
+                    "per_device_train_batch_size"
+                ]
+                self.logger.summary[
+                    "auto_computed_grad_acc_steps"
+                ] = self.training_args["gradient_accumulation_steps"]
+
+            self.training_args = orig_training_args
 
         trainer.save_model()
 
