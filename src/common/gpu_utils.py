@@ -15,6 +15,8 @@ Author: Jan Schlüter
 import ctypes
 
 import logging
+import os
+import subprocess
 
 logger = logging.getLogger('app')
 
@@ -135,3 +137,23 @@ def get_cuda_info():
         return_obj.append(obj)
 
     return return_obj
+
+def get_num_gpus() -> int:
+    """
+    Get number of gpus using nvidia-smi command
+    """
+    if "NUM_GPUS" in os.environ:
+        num_gpus = os.environ["NUM_GPUS"]
+        try:
+            num_gpus = int(num_gpus)
+            return num_gpus
+        except ValueError:
+            pass
+
+    try:
+        out = subprocess.check_output(['nvidia-smi', '-L'])
+        return len(out.decode().splitlines())
+    except FileNotFoundError:
+        pass
+
+    return -1

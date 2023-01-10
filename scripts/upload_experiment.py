@@ -18,7 +18,7 @@ os.environ[wandb_env.DISABLE_CODE] = "true"
 
 
 LOAD_GPU_COUNTS_TO_VAR = """
-NUM_GPUS=$(nvidia-smi -L | wc -l)
+source scripts/set_num_gpus.sh
 """
 
 FAIL_IF_SWEEP_NOT_COMPLETE = """

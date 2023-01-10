@@ -77,13 +77,19 @@ class CustomWandbCallback(WandbCallback):
             # keep track of model topology and gradients, unsupported on TPU
             from transformers import is_torch_tpu_available
 
-            if not is_torch_tpu_available() and os.getenv("WANDB_WATCH") != "false":
-                self._wandb.watch(
-                    model,
-                    log=os.getenv("WANDB_WATCH", "gradients"),
-                    log_freq=max(100, args.logging_steps),
-                    log_graph=True,
-                )
+            if (
+                not is_torch_tpu_available()
+                and os.getenv("WANDB_WATCH", "false") != "false"
+            ):
+                has_already_watched = getattr(self, "_has_already_watched", False)
+                if not has_already_watched:
+                    self._wandb.watch(
+                        model,
+                        log=os.getenv("WANDB_WATCH", "gradients"),
+                        log_freq=max(100, args.logging_steps),
+                        log_graph=True,
+                    )
+                    self._has_already_watched = True
 
     def on_log(self, args, state, control, model=None, logs=None, **kwargs):
         if self._wandb is None:
@@ -153,7 +159,6 @@ class Seq2SeqRuntime(Runtime):
         config_dict: Optional[Dict[str, Any]] = None,
         sweep_run: Optional[bool] = False,
         analyzers: List[Optional[JsonDict]] = None,
-        auto_compute_batch_size: Optional[bool] = False,
         config_filenames: Optional[List[str]] = None,
         **kwargs,
     ):
@@ -180,26 +185,8 @@ class Seq2SeqRuntime(Runtime):
         self.debug_mode = self.global_vars.get("debug_mode", False)
         self.force_offline = self.global_vars.get("force_offline", False)
         self.config_dict = config_dict
-        self.auto_compute_batch_size = auto_compute_batch_size
 
         self.training_args = trainer or {}
-
-        if "target_batch_size" in self.training_args:
-            target_batch_size = self.training_args["target_batch_size"]
-            if torch.cuda.is_available():
-                num_devices = torch.cuda.device_count()
-            else:
-                num_devices = 1
-
-            self.training_args["per_device_train_batch_size"] = (
-                target_batch_size // num_devices
-            )
-
-            logger.info(f"Target device batch size: {target_batch_size}")
-            logger.info(f"Number of compute devices: {num_devices}")
-            logger.info(
-                f"Setting per_device_train_batch_size to {self.training_args['per_device_train_batch_size']}"
-            )
 
         seed = self.global_vars["seed"]
         logger.info(f"Setting seed = {seed}")
@@ -233,6 +220,39 @@ class Seq2SeqRuntime(Runtime):
         self.hp_search_space = hp_search_space or Lazy(HPSearchSpace)
 
         self.analyzers = analyzers or []
+
+        if "target_batch_size" in self.training_args:
+            target_batch_size = self.training_args["target_batch_size"]
+            world_size = os.environ.get("WORLD_SIZE", None)
+            if world_size is not None:
+                num_devices = int(world_size)
+            else:
+                if torch.cuda.is_available():
+                    num_gpus = gpu_utils.get_num_gpus()
+                    if num_gpus == -1:
+                        num_devices = torch.cuda.device_count()
+                    else:
+                        num_devices = num_gpus
+                else:
+                    num_devices = 1
+
+            num_devices = max(num_devices, 1)
+
+            self.training_args["per_device_train_batch_size"] = (
+                target_batch_size // num_devices
+            )
+
+            logger.info(f"Target batch size: {target_batch_size}")
+            logger.info(f"Number of compute devices: {num_devices}")
+            logger.info(
+                f"Setting per_device_train_batch_size "
+                f"to {self.training_args['per_device_train_batch_size']}"
+            )
+
+            self.logger.summary["computed_per_device_train_batch_size"] = (
+                self.training_args["per_device_train_batch_size"]
+            )
+            self.logger.summary["computed_num_process"] = num_devices
 
     def write_meta_data(self):
         if not is_world_process_zero():
@@ -354,7 +374,8 @@ class Seq2SeqRuntime(Runtime):
         training_args["output_dir"] = str(self.exp_root / "checkpoints")
         training_args["report_to"] = "none"
 
-        _ = self.training_args.pop("target_batch_size", None)
+        _ = training_args.pop("target_batch_size", None)
+        _ = training_args.pop("auto_compute_batch_size", None)
 
         if kwargs.get("eval_dataset", None) is None:
             training_args["evaluation_strategy"] = "no"
@@ -536,7 +557,10 @@ class Seq2SeqRuntime(Runtime):
         else:
             logger.info(f"Initializing training from scratch")
 
-        if not self.auto_compute_batch_size:
+        auto_compute_batch_size = self.training_args.get(
+            "auto_compute_batch_size", False
+        )
+        if not auto_compute_batch_size:
             train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
         else:
             # Compute the maximum batch size fits into the gpu
