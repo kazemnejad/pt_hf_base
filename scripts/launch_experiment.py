@@ -660,6 +660,8 @@ def print_info(args: argparse.Namespace):
         print("No jobs in queue")
         return
 
+    jobs.sort(key=lambda x: x[1])
+
     import wandb
 
     project = os.environ.get("WANDB_PROJECT", "comp-gen_v2")
@@ -668,6 +670,7 @@ def print_info(args: argparse.Namespace):
     for i, (job_id, launcher_id, state) in enumerate(jobs):
         print("\n\n----------------------------------------")
         print(f"{i + 1}: Job {job_id}, LauncherID {launcher_id} is in state {state}")
+        print("\tcd ~/sbatch_logs/{launcher_ids} && ls -lha")
         try:
             launcher_run = api.run(f"{project}/{launcher_id}")
         except Exception as e:
