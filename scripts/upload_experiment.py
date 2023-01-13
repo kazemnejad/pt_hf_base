@@ -465,9 +465,12 @@ def main(args: argparse.Namespace):
     if args.seeds is not None:
         job_type = "seed_launcher"
         group = f"SE-{exp_name}"
-    elif args.sweep_id is not None or args.sweep_configs is not None:
+    elif args.sweep_id is not None:
         job_type = "agent"
         group = f"sweep-{os.path.basename(args.sweep_id)}"
+    elif args.sweep_configs is not None:
+        job_type = "agent"
+        group = f"sweep-{exp_name}"
 
     if args.group is not None:
         group = args.group
