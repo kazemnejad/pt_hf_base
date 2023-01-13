@@ -2,18 +2,24 @@
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import shlex
-import site
 import subprocess
 import tempfile
 from pathlib import Path
 from shutil import which
 from typing import Dict, Union, Any, List, Tuple
 
-site.addsitedir("src/")
-from common import py_utils
+
+def create_md5_hash(inp: str):
+    # Create MD5 hash object
+    md5 = hashlib.md5()
+    # Update the hash with the string
+    md5.update(inp.encode("utf-8"))
+    # Get the hexadecimal representation of the hash
+    return md5.hexdigest()
 
 
 def make_executable(script_path):

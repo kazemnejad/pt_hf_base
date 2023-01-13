@@ -1,7 +1,7 @@
 #!/bin/bash
 
 VENV_PATH=~/venv_pt_hf_base
-REPO_DIR=$(dirname "$(pwd)")
+REPO_DIR=$(pwd)
 
 module load python/3.9
 if [ ! -d "$VENV_PATH" ]; then
@@ -20,7 +20,7 @@ fi
 
 module load gcc arrow scipy-stack
 source $VENV_PATH/bin/activate
-pip install torch torchvision transformers datasets sklearn sentencepiece seqeval
+pip install torch torchvision transformers==4.16.2 datasets sklearn sentencepiece seqeval
 mkdir -p ~/scratch/experiments/hf_cache
 mkdir -p ~/scratch/experiments/hf_ds_cache
 mkdir -p ~/scratch/experiments/hf_module_cache
@@ -31,3 +31,5 @@ export HF_MODULES_CACHE=~/scratch/experiments/hf_module_cache
 
 cd $REPO_DIR
 python scripts/preload_hf_models.py
+
+echo "alias launcher=\"source $VENV_PATH/bin/activate && python $REPO_DIR/scripts/launcher.py\"" >> ~/.bashrc

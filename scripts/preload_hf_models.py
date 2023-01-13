@@ -16,11 +16,13 @@ model_names = [
     "bert-base-cased",
 ]
 for model_name in model_names:
-    AutoTokenizer.from_pretrained(model_name)
+    t = AutoTokenizer.from_pretrained(model_name)
+    del t
 for model_name in model_names:
-    AutoModel.from_pretrained(model_name)
+    m = AutoModel.from_pretrained(model_name)
+    del m
 
-load_metric("glue", "rte")
-load_metric("accuracy")
-load_metric("seqeval")
-load_metric("squad")
+_ = load_metric("glue", "rte")
+_ = load_metric("accuracy")
+_ = load_metric("seqeval")
+_ = load_metric("squad")
