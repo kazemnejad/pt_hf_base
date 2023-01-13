@@ -367,34 +367,47 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         self, tmp_exp_dir: Path, persistent_key: str
     ) -> str:
         script = super()._create_post_sbatch_launch_script(tmp_exp_dir, persistent_key)
+        if self.interactive:
+            return script
 
         script += "\n\n"
-        script += 'if [ ! -d "$HOME/.wandb_cache_dir" ]; then\n'
-        script += "\tmv $HOME/.wandb_cache_dir $HOME/.wandb_cache_dir.back\n"
+        script += 'if [[ -e "~/.wandb_cache_dir" ]] ; then\n'
+        script += "\tmoved_wandb_cache=1\n"
+        script += "\tmv ~/.wandb_cache_dir ~/.wandb_cache_dir.back\n"
         script += "fi\n\n"
 
-        script += f"ln -sfn {self.cluster_shared_storage_dir}/experiments/wandb_cache_dir $HOME/.wandb_cache_dir\n"
-        script += "export WANDB_CACHE_DIR=$HOME/.wandb_cache_dir\n"
+        script += 'if [[ -e "~/experiments" ]] ; then\n'
+        script += "\tmoved_experiment=1\n"
+        script += "\tmv ~/experiments ~/experiments.back\n"
+        script += "fi\n\n"
+
+        script += f"ln -sfn {self.experiments_dir}/wandb_cache_dir ~/.wandb_cache_dir\n"
+        script += "export WANDB_CACHE_DIR=~/.wandb_cache_dir\n"
         script += (
-            f"find {self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/wandb/ "
+            f"find {self.experiments_dir}/{persistent_key}/wandb/ "
             f'-maxdepth 1 -type d -name "offline*" '
             f"-exec wandb sync --mark-synced --no-include-synced {{}} \; "
             f"-exec sleep 5s \;\n\n"
         )
 
         script += (
-            f"find {self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/ "
+            f"find {self.experiments_dir}/{persistent_key}/ "
             f'-name "*.bin" -type f -delete\n'
         )
 
         script += (
-            f"find {self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/ "
+            f"find {self.experiments_dir}/{persistent_key}/ "
             f'-name "*.pt" -type f -delete\n\n'
         )
 
-        script += 'if [ ! -d "$HOME/.wandb_cache_dir.back" ]; then\n'
-        script += "\trm $HOME/.wandb_cache_dir\n"
-        script += "\tmv $HOME/.wandb_cache_dir.back $HOME/.wandb_cache_dir\n"
+        script += 'if test -v moved_wandb_cache; then\n'
+        script += "\trm ~/.wandb_cache_dir\n"
+        script += "\tmv ~/.wandb_cache_dir.back ~/.wandb_cache_dir\n"
+        script += "fi\n\n"
+
+        script += 'if test -v moved_experiment; then\n'
+        script += "\trm ~/experiments\n"
+        script += "\tmv ~/experiments.back ~/experiments\n"
         script += "fi\n\n"
 
         return script

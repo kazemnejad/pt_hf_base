@@ -356,11 +356,17 @@ def make_run_script_sweep_manual_agent(
 
     script += f"\nexport SWEEP_NAME={sweep_name}\n"
     script += f"export SWEEP_CONFIGS='{sweep_configs}'\n"
+    script += f"export SWEEP_ROOT_DIR=experiments/$SWEEP_NAME\n"
+    script += f"mkdir -p $SWEEP_ROOT_DIR\n"
+
     script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
     script += f"export WANDB_TAGS=sweep,manual_sweep,launched_by_{exp_key}\n"
 
     script += f"\nchmod a+x scripts/manual_sweep_agent.sh\n"
-    script += f"./scripts/manual_sweep_agent.sh\n"
+    script += f"./scripts/manual_sweep_agent.sh\n\n"
+
+    script += f"\nchmod a+x scripts/autoDist_manual_sweep_launch_best_run.sh\n"
+    script += f"./scripts/autoDist_manual_sweep_launch_best_run.sh\n\n"
 
     post_script = maybe_add_post_script(args)
     if post_script != "":

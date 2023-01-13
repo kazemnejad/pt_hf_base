@@ -13,11 +13,7 @@ if [ -z "$SWEEP_NAME" ]; then
 fi
 
 export APP_LAUNCHED_BY_MANUAL_SWEEPER=1
-
-EXPS_DIR="experiments"
-
-export SWEEP_ROOT_DIR=$EXPS_DIR/$SWEEP_NAME
-mkdir -p $SWEEP_ROOT_DIR
+export APP_MANUAL_SWEEP=1
 
 python scripts/manual_sweep.py \
   --sweep_name $SWEEP_NAME \
@@ -62,7 +58,7 @@ for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
     --sweep_configs $SWEEP_CONFIGS \
     generate_deterministic_run_id --run_name $RUN_NAME)
 
-  APP_MANUAL_SWEEP_HYPERPARAMETER_FILE=$CONFIG_FILE APP_SWEEP_ROOT_DIR=$SWEEP_ROOT_DIR RUN_ID=$RUN_ID $SWEEP_PROGRAM
+  APP_MANUAL_SWEEP_HYPERPARAMETER_FILE=$CONFIG_FILE APP_SWEEP_ROOT_DIR=$SWEEP_ROOT_DIR RUN_ID=$RUN_ID ./$SWEEP_PROGRAM
 done
 
 python scripts/manual_sweep.py \
