@@ -173,10 +173,6 @@ class Seq2SeqRuntime(Runtime):
         exp_root.mkdir(parents=True, exist_ok=True)
         self.exp_root = exp_root
 
-        cache_dir = Path(os.getcwd()) / "experiments" / "hf_cache_dir"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_dir = cache_dir
-
         logs_dir = self.exp_root / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir = logs_dir
@@ -199,7 +195,6 @@ class Seq2SeqRuntime(Runtime):
             assert self.logger is not None
 
         self.dl_factory = self.lazy_dataset.construct(
-            cache_dir=self.cache_dir,
             log_dir=self.logs_dir,
             debug_mode=self.debug_mode,
             seed=seed,
@@ -210,7 +205,6 @@ class Seq2SeqRuntime(Runtime):
             self.tokenizer = tokenizer.construct(
                 dataset=self.dl_factory,
                 experiment_root=self.exp_root,
-                cache_dir=self.cache_dir,
             )
         else:
             self.tokenizer = None
@@ -350,7 +344,7 @@ class Seq2SeqRuntime(Runtime):
 
             logger.info(f"Loading initial model weights from {arg}...")
             model = model_class.from_pretrained(
-                arg, **model_kwargs, cache_dir=str(self.cache_dir)
+                arg, **model_kwargs
             )
         else:
             model = model_constructor(**model_kwargs)
@@ -996,7 +990,6 @@ class Seq2SeqRuntime(Runtime):
 
         base_model_config = self.config_dict.get("model", {})
         tokenizer = self.tokenizer
-        cache_dir = self.cache_dir
 
         def model_init(config: Dict[str, Any]) -> Model:
             config = config or {}
@@ -1017,7 +1010,6 @@ class Seq2SeqRuntime(Runtime):
 
             model = Lazy(Model, params=new_config).construct(
                 tokenizer=tokenizer,
-                cache_dir=cache_dir,
             )
 
             return model

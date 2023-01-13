@@ -170,7 +170,6 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
             default_hf_ds_kwargs = {
                 "data_files": {path.name: [str(path)]},
                 "split": path.name,
-                "cache_dir": self.cache_dir,
             }
             ds = self.hf_ds.construct(
                 **{
