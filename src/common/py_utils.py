@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 from argparse import Namespace
@@ -207,3 +208,34 @@ def load_jsonnet_config(filenames: List[str]) -> JsonDict:
 
 def eval_bool_env_var(key: str) -> bool:
     return os.environ.get(key, "False").lower() in ["true", "1", "yes", "y", "t"]
+
+
+def get_run_name_from_config_obj(config_obj: Dict[str, Any], sep: str = ".") -> str:
+    def param_name(param: str) -> str:
+        param_parts = param.split(sep)
+        if len(param_parts) == 1:
+            return param[:2] + param[-2:]
+        last_part = param_parts[-1]
+        name = sep.join(
+            [p[0] for p in param_parts[:-1]] + [last_part[:2] + last_part[-2:]]
+        )
+        return name
+
+    config_pairs = [(param_name(k), v) for k, v in config_obj.items()]
+    run_name = sorted(config_pairs, key=lambda x: x[0])
+    run_name = "__".join(f"{k}-{str(v)}" for k, v in run_name)
+    return run_name
+
+
+def create_md5_hash(inp: str):
+    # Create MD5 hash object
+    md5 = hashlib.md5()
+    # Update the hash with the string
+    md5.update(inp.encode("utf-8"))
+    # Get the hexadecimal representation of the hash
+    return md5.hexdigest()
+
+
+def generate_deterministic_hp_run_id(sweep_name: str, run_name: str) -> str:
+    hash_str = create_md5_hash(sweep_name + "__" + run_name)
+    return "sw_" + hash_str

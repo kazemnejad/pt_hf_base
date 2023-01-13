@@ -54,7 +54,12 @@ class EntryPoint(object):
             config["global_vars"]["debug_mode"] = debug_mode
 
         if config.get("sweep_run", False):
-            config = self._get_config_for_sweep(config)
+            is_manual_sweep = os.environ.get("APP_MANUAL_SWEEP", False)
+            if not is_manual_sweep:
+                config = self._get_config_for_sweep(config)
+            else:
+                logger.info("Activating manual sweep mode")
+                config = self._get_config_for_manual_sweep(config)
         else:
             config["exp_name"] = os.environ.get(
                 "APP_EXPERIMENT_NAME", unique_experiment_name(config)
@@ -129,9 +134,8 @@ class EntryPoint(object):
 
         exps_dir = sweep_root / "exps"
         exps_dir.mkdir(parents=True, exist_ok=True)
-
         config["directory"] = str(exps_dir)
-        config["exp_name"] = run_id
+
 
         run = wandb.init(allow_val_change=True)
         new_hyperparams = run.config.as_dict()
@@ -143,7 +147,8 @@ class EntryPoint(object):
             key=lambda x: x[0],
         )
         run_name = "_".join(f"{k[:2]+k[-2:]}:{str(v)}" for k, v in run_name)
-        run.name = f"{run_name}___{run_id}"
+        run.name = run_name
+        config["exp_name"] = run_name
 
         new_hyperparams = unflatten(new_hyperparams, ".")
         logger.info(f"New hyperparams: {new_hyperparams}")
@@ -157,6 +162,36 @@ class EntryPoint(object):
         patched_config = json.loads(patched_config)
 
         run.config.update(patched_config)
+
+        return patched_config
+
+    def _get_config_for_manual_sweep(self, config: JsonDict) -> JsonDict:
+        assert (
+            "APP_LAUNCHED_BY_MANUAL_SWEEPER" in os.environ
+        ), "This is not a manual sweep run"
+
+        sweep_root = os.environ["APP_SWEEP_ROOT_DIR"]
+
+        sweep_root = Path(sweep_root)
+        exps_dir = sweep_root / "exps"
+        exps_dir.mkdir(parents=True, exist_ok=True)
+        config["directory"] = str(exps_dir)
+
+        new_hyperparams_file = os.environ["APP_MANUAL_SWEEP_HYPERPARAMETER_FILE"]
+        with open(new_hyperparams_file, "r") as f:
+            new_hyperparams: Dict[str, Any] = json.load(f)
+        run_name = new_hyperparams.pop("__exp_name__")
+        config["exp_name"] = run_name
+
+        new_hyperparams = unflatten(new_hyperparams, ".")
+
+        jsonnet_str = f"""
+                    local base = {json.dumps(config)};
+                    local diff = {new_hyperparams}; 
+                    std.mergePatch(base, diff)
+                    """
+        patched_config = _jsonnet.evaluate_snippet("snippet", jsonnet_str)
+        patched_config = json.loads(patched_config)
 
         return patched_config
 

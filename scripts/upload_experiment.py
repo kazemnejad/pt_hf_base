@@ -1,4 +1,5 @@
 import argparse
+import copy
 import os
 import shlex
 import site
@@ -29,6 +30,7 @@ if [ $? -ne 0 ]; then
 fi
 """
 
+
 def maybe_add_post_script(args) -> str:
     if args is not None and args.post_script is not None:
         post_script = args.post_script
@@ -45,17 +47,21 @@ def use_torch_distributed(args: argparse.Namespace = None) -> bool:
         and args.use_torch_distributed
     )
 
+
 def maybe_set_master_ip_and_address(args: argparse.Namespace = None) -> str:
     if use_torch_distributed(args):
         return "\nsource scripts/set_master_ip_and_addr.sh\n"
     return ""
+
 
 def command_to_bash_str(
     cmd: str, configs_str: str, prefix: str = "", args: argparse.Namespace = None
 ) -> str:
     cmd = cmd.strip()
     # Currently torch distributed is only supported for train and hp_step
-    if use_torch_distributed(args) and any([c in cmd for c in ["train", "hp_step", "predict"]]):
+    if use_torch_distributed(args) and any(
+        [c in cmd for c in ["train", "hp_step", "predict"]]
+    ):
         script = (
             f"{prefix}torchrun --standalone --nnodes=1 --nproc_per_node=$NUM_GPUS \\\n"
         )
@@ -85,6 +91,7 @@ def make_run_script(
 
     script += f"export WANDB_RUN_ID={exp_key}\n"
     script += f"export APP_EXPERIMENT_NAME={exp_name}\n"
+    script += f"export WANDB_TAGS=launched_by_{exp_key}\n"
 
     if use_torch_distributed(args):
         script += LOAD_GPU_COUNTS_TO_VAR
@@ -150,6 +157,7 @@ def make_run_script_seeds(
     script += f"export WANDB_RUN_GROUP={args.group}\n"
     script += f"export ORIG_APP_EXPERIMENT_NAME={exp_name}\n"
     script += f"export ORIG_WANDB_RUN_ID={exp_key}\n"
+    script += f"export WANDB_TAGS=launched_by_{exp_key}\n"
 
     if use_torch_distributed(args):
         script += LOAD_GPU_COUNTS_TO_VAR
@@ -181,7 +189,7 @@ def make_run_script_seeds(
     with open(script_path, "w") as f:
         f.write(script)
 
-    subprocess.check_call(shlex.split(f"vim {script_path}"))
+    # subprocess.check_call(shlex.split(f"vim {script_path}"))
 
     return script_path
 
@@ -196,7 +204,8 @@ def make_run_script_sweep_job(
     args=None,
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
-    script += "\nexport WANDB_JOB_TYPE=hp_exp\n\n\n"
+    script += "\nexport WANDB_JOB_TYPE=hp_exp\n"
+    script += f"export WANDB_TAGS=launched_by_{exp_key}\n\n\n"
 
     if use_torch_distributed(args):
         script += LOAD_GPU_COUNTS_TO_VAR
@@ -243,6 +252,7 @@ def make_run_script_sweep_agent(
 
     script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
     script += f"export WANDB_DIR=experiments/wandb_sweep_{sweep_key}\n"
+    script += f"export WANDB_TAGS=launched_by_{exp_key}\n"
     script += f"export SWEEP_ID={sweep_id}\n"
     script += f"mkdir -p $WANDB_DIR\n"
 
@@ -250,6 +260,111 @@ def make_run_script_sweep_agent(
 
     script += f"\nchmod a+x ./job.sh\n"
     script += f"wandb agent {sweep_id}\n"
+
+    post_script = maybe_add_post_script(args)
+    if post_script != "":
+        script += FAIL_IF_SWEEP_NOT_COMPLETE
+        script += post_script
+
+    script += '\necho "Experiment finished!"\n'
+
+    tmp_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    script_path = tmp_dir / "run.sh"
+    with open(script_path, "w") as f:
+        f.write(script)
+
+    return script_path
+
+
+def make_run_script_sweep_manual_job(
+    configs: str,
+    commands: str,
+    env_vars: str,
+    exp_key: str,
+    exp_name: str,
+    seeds: int,
+    args=None,
+) -> Path:
+    script = "#!/bin/bash\n\n\n"
+    script += "\nexport WANDB_JOB_TYPE=hp_exp\n"
+    script += "export WANDB_RUN_ID=$RUN_ID\n"
+    script += f"export WANDB_TAGS=launched_by_{exp_key}\n\n\n"
+
+    script += LOAD_GPU_COUNTS_TO_VAR
+
+    script += 'if [ "$NUM_GPUS" -gt 1 ]; then\n'
+
+    script += "\tsource scripts/set_master_ip_and_addr.sh\n"
+    args_cp = copy.deepcopy(args)
+    args_cp.use_torch_distributed = True
+    configs_str = configs
+    for c in commands.split(","):
+        script += command_to_bash_str(c, configs_str, prefix="\t", args=args)
+
+    script += f"else\n"
+
+    args_cp = copy.deepcopy(args)
+    args_cp.use_torch_distributed = False
+    configs_str = configs
+    for c in commands.split(","):
+        script += command_to_bash_str(c, configs_str, prefix="\t", args=args)
+
+    script += "fi\n"
+
+    script += '\necho "Experiment finished!"\n'
+
+    tmp_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    script_path = tmp_dir / "job.sh"
+    with open(script_path, "w") as f:
+        f.write(script)
+
+    # subprocess.check_call(shlex.split(f"vim {script_path}"))
+
+    return script_path
+
+
+def make_run_script_sweep_manual_agent(
+    configs: str,
+    commands: str,
+    env_vars: str,
+    exp_key: str,
+    exp_name: str,
+    sweep_id: str,
+    args=None,
+) -> Path:
+    sweep_id = None
+
+    script = "#!/bin/bash\n\n\n"
+
+    if env_vars:
+        for ev in env_vars.split(","):
+            ev = ev.strip()
+            script += f"export {ev}\n"
+
+    script = add_python_paths(script)
+    script += "\n\n"
+
+    sweep_configs = args.sweep_configs
+    assert sweep_configs is not None
+
+    sweep_name = args.sweep_name
+    if sweep_name is None:
+        # Make Auto Sweep Name
+        sweep_name = unique_experiment_name_from_filenames(sweep_configs)
+
+    script += f"\nexport SWEEP_NAME={sweep_name}\n"
+    script += f"export SWEEP_CONFIGS='{sweep_configs}'\n"
+    script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
+    script += f"export WANDB_DIR=experiments/$SWEEP_NAME\n"
+    script += f"export WANDB_TAGS=launched_by_{exp_key}\n"
+    script += f"mkdir -p $WANDB_DIR\n"
+
+    script += f"ln -srnf experiments/$SWEEP_NAME experiments/{exp_name}/$SWEEP_NAME\n"
+
+    script += f"\nchmod a+x scripts/manual_sweep_agent.sh\n"
+    script += f"./scripts/manual_sweep_agent.sh\n"
 
     post_script = maybe_add_post_script(args)
     if post_script != "":
@@ -282,7 +397,7 @@ def make_metadata(exp_name, exp_key):
 
 def unique_experiment_name_from_filenames(config_filenames):
     for p in config_filenames:
-        assert os.path.exists(p)
+        assert os.path.exists(p), p
 
     configs = "_".join(
         [os.path.splitext(os.path.basename(p))[0] for p in config_filenames]
@@ -407,6 +522,25 @@ def main(args: argparse.Namespace):
             args=args,
         )
         job_script_path = make_run_script_sweep_job(
+            configs,
+            args.commands,
+            args.env_vars,
+            run_id,
+            exp_name,
+            args.sweep_id,
+            args=args,
+        )
+    elif args.sweep_configs is not None:
+        run_script_path = make_run_script_sweep_manual_agent(
+            configs,
+            args.commands,
+            args.env_vars,
+            run_id,
+            exp_name,
+            args.sweep_id,
+            args=args,
+        )
+        job_script_path = make_run_script_sweep_manual_job(
             configs,
             args.commands,
             args.env_vars,
@@ -576,6 +710,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Use torch.distributed.launch",
         default=False,
+    )
+
+    parser.add_argument(
+        "--sweep_name", metavar="SWEEP_NAME", type=str, help="Sweep name"
+    )
+
+    parser.add_argument(
+        "--sweep_configs", metavar="SWEEP_CONFIGS", type=str, help="Sweep configs"
     )
 
     args = parser.parse_args()

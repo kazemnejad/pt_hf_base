@@ -287,10 +287,8 @@ class Seq2SeqRuntime(Runtime):
             if wandb.run is None and is_world_process_zero():
                 if self.debug_mode:
                     mode = "disabled"
-                elif self.force_offline:
-                    mode = "offline"
                 else:
-                    mode = "online"
+                    mode = None
 
                 wandb_entity = self.global_vars.get("wandb_entity", None)
 
@@ -300,7 +298,6 @@ class Seq2SeqRuntime(Runtime):
                     _disable_meta=False,
                 )
                 wandb.init(
-                    dir=str(self.logs_dir),
                     config=self.config_dict,
                     project=self.project_name,
                     name=self.exp_name,
@@ -730,6 +727,10 @@ class Seq2SeqRuntime(Runtime):
                     total=len(preds) // 128,
                     desc="Decoding predictions",
                 ):
+                    # Convert -100 to 0
+                    batch_preds = np.where(
+                        batch_preds == -100, self.tokenizer.pad_token_id, batch_preds
+                    )
                     pred_texts = self.tokenizer.batch_decode(
                         batch_preds,
                         skip_special_tokens=True,
@@ -885,6 +886,7 @@ class Seq2SeqRuntime(Runtime):
 
         logger.info(f"Using {analyzer.__class__.__name__}...")
         analyzer.analyze()
+        analyzer.flush_local_log()
 
     def analyze_all(self, load_best: bool = True, split: str = "test"):
         if not is_world_process_zero():
@@ -938,6 +940,7 @@ class Seq2SeqRuntime(Runtime):
 
             logger.info(f"Using {analyzer.__class__.__name__}...")
             analyzer.analyze()
+            analyzer.flush_local_log()
 
     def get_loaded_trainer(
         self, load_best: bool = False, checkpoint_name: str = None
