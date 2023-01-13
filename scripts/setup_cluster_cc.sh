@@ -1,6 +1,7 @@
 #!/bin/bash
 
 VENV_PATH=~/venv_pt_hf_base
+REPO_DIR=$(dirname "$(pwd)")
 
 module load python/3.9
 if [ ! -d "$VENV_PATH" ]; then
@@ -28,4 +29,5 @@ export TRANSFORMERS_CACHE=~/scratch/experiments/hf_cache
 export HF_DATASETS_CACHE=~/scratch/experiments/hf_ds_cache
 export HF_MODULES_CACHE=~/scratch/experiments/hf_module_cache
 
+cd $REPO_DIR
 python scripts/preload_hf_models.py
