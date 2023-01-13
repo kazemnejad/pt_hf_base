@@ -675,6 +675,13 @@ if __name__ == "__main__":
         default=False,
     )
 
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Run the job interactively",
+        default=False,
+    )
+
     args = parser.parse_args()
 
     main(args)
