@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Get project name from args
+PROJECT_NAME=$1
+
+# Assert project name is not empty
+if [ -z "$PROJECT_NAME" ]; then
+  echo "Project name is empty"
+  exit 1
+fi
+
 VENV_PATH=~/venv_pt_hf_base
 REPO_DIR=$(pwd)
 
@@ -21,13 +30,13 @@ fi
 module load gcc arrow scipy-stack
 source $VENV_PATH/bin/activate
 pip install torch torchvision transformers==4.16.2 datasets sklearn sentencepiece seqeval
-mkdir -p ~/scratch/experiments/hf_cache
-mkdir -p ~/scratch/experiments/hf_ds_cache
-mkdir -p ~/scratch/experiments/hf_module_cache
-mkdir -p ~/scratch/experiments/wandb_cache_dir
-export TRANSFORMERS_CACHE=~/scratch/experiments/hf_cache
-export HF_DATASETS_CACHE=~/scratch/experiments/hf_ds_cache
-export HF_MODULES_CACHE=~/scratch/experiments/hf_module_cache
+mkdir -p ~/scratch/$PROJECT_NAME/experiments/hf_cache
+mkdir -p ~/scratch/$PROJECT_NAME/experiments/hf_ds_cache
+mkdir -p ~/scratch/$PROJECT_NAME/experiments/hf_module_cache
+mkdir -p ~/scratch/$PROJECT_NAME/experiments/wandb_cache_dir
+export TRANSFORMERS_CACHE=~/scratch/$PROJECT_NAME/experiments/hf_cache
+export HF_DATASETS_CACHE=~/scratch/$PROJECT_NAME/experiments/hf_ds_cache
+export HF_MODULES_CACHE=~/scratch/$PROJECT_NAME/experiments/hf_module_cache
 
 cd $REPO_DIR
 python scripts/preload_hf_models.py

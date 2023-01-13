@@ -300,7 +300,7 @@ def make_run_script_sweep_manual_job(
     args_cp.use_torch_distributed = True
     configs_str = configs
     for c in commands.split(","):
-        script += command_to_bash_str(c, configs_str, prefix="\t", args=args)
+        script += command_to_bash_str(c, configs_str, prefix="\t", args=args_cp)
 
     script += f"else\n"
 
@@ -308,7 +308,7 @@ def make_run_script_sweep_manual_job(
     args_cp.use_torch_distributed = False
     configs_str = configs
     for c in commands.split(","):
-        script += command_to_bash_str(c, configs_str, prefix="\t", args=args)
+        script += command_to_bash_str(c, configs_str, prefix="\t", args=args_cp)
 
     script += "fi\n"
 
@@ -358,9 +358,6 @@ def make_run_script_sweep_manual_agent(
     script += f"export SWEEP_CONFIGS='{sweep_configs}'\n"
     script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
     script += f"export WANDB_TAGS=sweep,manual_sweep,launched_by_{exp_key}\n"
-    script += f"mkdir -p $WANDB_DIR\n"
-
-    script += f"ln -srnf experiments/$SWEEP_NAME experiments/{exp_name}/$SWEEP_NAME\n"
 
     script += f"\nchmod a+x scripts/manual_sweep_agent.sh\n"
     script += f"./scripts/manual_sweep_agent.sh\n"

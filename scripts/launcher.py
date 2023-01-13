@@ -124,6 +124,11 @@ class SlurmComputingCluster(ComputingCluster):
         self.hf_datasets_offline = hf_datasets_offline
         self.account = account
 
+        self.experiments_dir = (
+            self.cluster_shared_storage_dir / self.project_name / "experiments"
+        )
+        self.experiments_dir.mkdir(parents=True, exist_ok=True)
+
     def prepare_job(self, output_dir: Path) -> str:
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -161,13 +166,11 @@ class SlurmComputingCluster(ComputingCluster):
                 "Unable to load metadata.json, computing "
                 "persistent_dir based on launcher_id"
             )
-            persistent_key = py_utils.create_md5_hash(self.launcher_id)
+            persistent_key = create_md5_hash(self.launcher_id)
 
         worker_script = f"#!/bin/bash\n\n"
-        worker_script += 'if [ -z "WANDB_CACHE_DIR" ]; then\n'
-        worker_script += (
-            f"\tln -sfn $HOME/experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
-        )
+        worker_script += "if test -v WANDB_CACHE_DIR; then\n"
+        worker_script += f"\tln -sfn experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
         worker_script += "fi\n\n"
 
         worker_script += "export WANDB_DIR=wandb_dir\n"
@@ -176,10 +179,8 @@ class SlurmComputingCluster(ComputingCluster):
         worker_script += "chmod a+x run.sh\n"
         worker_script += "./run.sh\n\n"
 
-        worker_script += f"mkdir -p experiments/{self.project_name}/{persistent_key}/\n"
-        worker_script += (
-            f"cp -r wandb_dir/* experiments/{self.project_name}/{persistent_key}/\n\n"
-        )
+        worker_script += f"mkdir -p experiments/{persistent_key}/\n"
+        worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
 
         save_and_make_executable(output_dir / self.run_script_name, worker_script)
 
@@ -241,10 +242,10 @@ class SlurmComputingCluster(ComputingCluster):
     ) -> str:
         script = "#!/bin/bash \n\n"
 
-        job_persistent_dir = f"{self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/"
+        job_persistent_dir = f"{self.experiments_dir}/{persistent_key}/"
         script += f"mkdir -p {job_persistent_dir}\n"
         script += f"ln -sfn {job_persistent_dir} {self.log_dir}/exp_dir\n"
-        script += f"ln -sfn {job_persistent_dir} {self.cluster_shared_storage_dir}/experiments/{self.project_name}/lid_{self.launcher_id}\n"
+        script += f"ln -sfn {job_persistent_dir} {self.experiments_dir}/lid_{self.launcher_id}\n"
         script += "sleep 5\n\n"
 
         script += f'echo "Copying credentials to container..."\n'
@@ -303,8 +304,8 @@ class SlurmComputingCluster(ComputingCluster):
         script += f'echo "Copying container {image_path} to compute node..." \n'
         script += f"rsync -avzP {image_path} {self.compute_node_storage_dir}/ \n\n"
 
-        stdout_path = f"{self.cluster_shared_storage_dir}/experiments/{self.project_name}/{self.launcher_id}/stdout.txt"
-        stderr_path = f"{self.cluster_shared_storage_dir}/experiments/{self.project_name}/{self.launcher_id}/stderr.txt"
+        stdout_path = f"{self.experiments_dir}/{persistent_key}/stdout.txt"
+        stderr_path = f"{self.experiments_dir}/{persistent_key}/stderr.txt"
         script += f"touch {stdout_path} \n"
         script += f"touch {stderr_path} \n\n"
 
@@ -329,7 +330,7 @@ class SlurmComputingCluster(ComputingCluster):
         if not self.interactive:
             script += "singularity exec --nv \\\n"
             script += f"\t-H {self.compute_node_storage_dir}/home:$HOME \\\n"
-            script += f"\t-B {self.cluster_shared_storage_dir}/experiments:$HOME/experiments \\\n"
+            script += f"\t-B {self.experiments_dir}:$HOME/experiments \\\n"
             script += f"\t{self.compute_node_storage_dir}/{self.image_name} \\\n"
             script += (
                 f"\t./{self.run_script_name} > {stdout_path} 2> {stderr_path} \n\n"
@@ -337,7 +338,7 @@ class SlurmComputingCluster(ComputingCluster):
         else:
             script += "singularity shell --nv \\\n"
             script += f"\t-H {self.compute_node_storage_dir}/home:$HOME \\\n"
-            script += f"\t-B {self.cluster_shared_storage_dir}/experiments:$HOME/experiments \\\n"
+            script += f"\t-B {self.experiments_dir}:$HOME/experiments \\\n"
             script += f"\t{self.compute_node_storage_dir}/{self.image_name} \n\n"
 
         return script
