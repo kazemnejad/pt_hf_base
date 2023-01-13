@@ -271,8 +271,8 @@ class SlurmComputingCluster(ComputingCluster):
             )
             script += f'echo "$ {compute_script_path}";\n'
             script += 'echo "--------------------------------------------------"; \n'
-            account_str = f"--account={args.account}" if args.account else ""
-            script += f"salloc {args.slurm_args} {account_str}\n"
+            account_str = f"--account={self.account}" if self.account else ""
+            script += f"salloc {self.slurm_args} {account_str}\n"
         return script
 
     def _create_post_sbatch_launch_script(
