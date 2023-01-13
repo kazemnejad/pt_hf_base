@@ -1,0 +1,671 @@
+#!/usr/bin/env python3
+
+import argparse
+import copy
+import json
+import os
+import shlex
+import site
+import subprocess
+import tempfile
+from pathlib import Path
+from shutil import which
+from typing import Dict, Union, Any, List, Tuple
+
+site.addsitedir("src/")
+from common import py_utils
+
+
+def make_executable(script_path):
+    mode = os.stat(str(script_path)).st_mode
+    mode |= (mode & 0o444) >> 2
+    os.chmod(str(script_path), mode)
+
+
+def get_tempfile_path():
+    return Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
+
+
+def is_tool(name):
+    """Check whether `name` is on PATH and marked as executable."""
+    return which(name) is not None
+
+
+def save_and_make_executable(job_path, script):
+    with open(job_path, "w") as f:
+        f.write(script)
+    make_executable(job_path)
+
+
+def replace_env_vars(target_str: str):
+    for key, value in os.environ.items():
+        target_str = target_str.replace(f"${key}", value)
+
+    return target_str
+
+
+class ComputingCluster:
+    def __init__(self, **kwargs):
+        pass
+
+    def setup_cluster(self) -> None:
+        pass
+
+    def prepare_job(self, output_dir: Path) -> str:
+        pass
+
+    def create_launch_script(self, job_body) -> Path:
+        pass
+
+    def execute_job(self, job_body):
+        pass
+
+
+class SlurmComputingCluster(ComputingCluster):
+    def __init__(
+        self,
+        launcher_id: str,
+        slurm_args: str,
+        project_name: str = "pt_hf_base",
+        images_dir: str = "containers",
+        image_name: str = "latest.sif",
+        logs_dir: str = "~/sbatch_logs/",
+        scripts_dir: str = "~/sbatch_jobs/",
+        shared_storage_dir: str = "$SCRATCH",
+        compute_storage_dir: str = "$SLURM_TMPDIR",
+        github_token: str = None,
+        interactive: bool = False,
+        wait_for_login_script: bool = False,
+        wandb_offline: bool = False,
+        transformers_offline: bool = False,
+        hf_datasets_offline: bool = False,
+        account: str = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.launcher_id = launcher_id
+
+        self.global_logs_dir = Path(replace_env_vars(logs_dir)).expanduser()
+        self.global_scripts_dir = Path(replace_env_vars(scripts_dir)).expanduser()
+        self.cluster_shared_storage_dir = Path(
+            replace_env_vars(shared_storage_dir)
+        ).expanduser()
+        self.compute_node_storage_dir = compute_storage_dir
+
+        self.singularity_image_library_path = (
+            self.cluster_shared_storage_dir / images_dir
+        )
+
+        self.log_dir = Path(self.global_logs_dir) / f"lid_{launcher_id}"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        self.script_dir = Path(self.global_scripts_dir) / f"lid_{launcher_id}"
+        self.script_dir.mkdir(parents=True, exist_ok=True)
+
+        self.image_name = image_name
+        self.slurm_args = slurm_args
+
+        self.github_token = github_token
+        self.wait_for_login_script = wait_for_login_script
+        self.interactive = interactive
+
+        self.project_name = project_name
+
+        self.run_script_name = "worker_job.sh"
+
+        self.wandb_offline = wandb_offline
+        self.transformers_offline = transformers_offline
+        self.hf_datasets_offline = hf_datasets_offline
+        self.account = account
+
+    def prepare_job(self, output_dir: Path) -> str:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        import wandb
+
+        project = os.environ.get("WANDB_PROJECT", "pt_hf_base")
+        user = os.environ.get("WANDB_USER", None)
+        api = wandb.Api(overrides={"project": project})
+        if user is not None:
+            artifact_name = f"{user}/{project}/"
+        else:
+            artifact_name = ""
+
+        artifact_name += f"bundle-{self.launcher_id}:latest"
+        artifact = api.artifact(artifact_name)
+        artifact.download(str(output_dir))
+
+        if "data" in artifact.metadata:
+            data_art_name = artifact.metadata["data"]
+            if ":" not in data_art_name:
+                data_art_name += ":latest"
+
+            data_artifact = api.artifact(data_art_name)
+            data_dir = output_dir / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            data_artifact.download(str(data_dir))
+
+        try:
+            metadata_path = output_dir / "metadata.json"
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+            persistent_key = metadata["exp_name"]
+        except Exception as e:
+            print(
+                "Unable to load metadata.json, computing "
+                "persistent_dir based on launcher_id"
+            )
+            persistent_key = py_utils.create_md5_hash(self.launcher_id)
+
+        worker_script = f"#!/bin/bash\n\n"
+        worker_script += 'if [ -z "WANDB_CACHE_DIR" ]; then\n'
+        worker_script += (
+            f"\tln -sfn $HOME/experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
+        )
+        worker_script += "fi\n\n"
+
+        worker_script += "export WANDB_DIR=wandb_dir\n"
+        worker_script += "mkdir -p $WANDB_DIR\n\n"
+
+        worker_script += "chmod a+x run.sh\n"
+        worker_script += "./run.sh\n\n"
+
+        worker_script += f"mkdir -p experiments/{self.project_name}/{persistent_key}/\n"
+        worker_script += (
+            f"cp -r wandb_dir/* experiments/{self.project_name}/{persistent_key}/\n\n"
+        )
+
+        save_and_make_executable(output_dir / self.run_script_name, worker_script)
+
+        return persistent_key
+
+    def execute_job(self, job_body):
+        login_script_path = self.create_launch_script(job_body)
+
+        if self.interactive:
+            subprocess.check_call([login_script_path])
+        else:
+            print("Started executing...")
+            print("To check all logs, visit this directory:")
+            print(f"$ cd {self.log_dir} && ls -lh")
+
+            log_path = self.log_dir / "launcher.txt"
+            log_file = open(log_path, "w")
+            p = subprocess.Popen(
+                [login_script_path],
+                start_new_session=True,
+                stdout=log_file,
+                stderr=log_file,
+            )
+
+            if self.wait_for_login_script:
+                p.wait()
+
+    def create_launch_script(self, job_body) -> Path:
+        tmp_exp_dir = (
+            self.cluster_shared_storage_dir
+            / "job_launcher_files"
+            / f"{self.launcher_id}"
+        )
+        tmp_exp_dir.mkdir(parents=True, exist_ok=True)
+
+        persistent_key = self.prepare_job(tmp_exp_dir / "home")
+        compute_script = self.create_compute_script(tmp_exp_dir, persistent_key)
+        compute_script_path = self.script_dir / "compute.sh"
+        save_and_make_executable(compute_script_path, compute_script)
+
+        login_script = self._create_pre_sbatch_launch_script(
+            tmp_exp_dir, persistent_key
+        )
+        login_script += self._create_sbatch_launch_script(
+            compute_script_path, persistent_key
+        )
+        login_script += self._create_post_sbatch_launch_script(
+            tmp_exp_dir, persistent_key
+        )
+        login_script += self._create_notify_script(job_body, persistent_key)
+
+        login_script_path = self.script_dir / f"login.sh"
+        save_and_make_executable(login_script_path, login_script)
+
+        return login_script_path
+
+    def _create_pre_sbatch_launch_script(
+        self, tmp_exp_dir: Path, persistent_key: str
+    ) -> str:
+        script = "#!/bin/bash \n\n"
+
+        job_persistent_dir = f"{self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/"
+        script += f"mkdir -p {job_persistent_dir}\n"
+        script += f"ln -sfn {job_persistent_dir} {self.log_dir}/exp_dir\n"
+        script += f"ln -sfn {job_persistent_dir} {self.cluster_shared_storage_dir}/experiments/{self.project_name}/lid_{self.launcher_id}\n"
+        script += "sleep 5\n\n"
+
+        script += f'echo "Copying credentials to container..."\n'
+        script += f"rsync -avz $HOME/.config {tmp_exp_dir}/home/\n"
+        script += f"rsync -avz $HOME/.aws {tmp_exp_dir}/home/\n"
+        script += f"rsync -avz $HOME/.codalab {tmp_exp_dir}/home/\n"
+        script += f"rsync -avz $HOME/.comet.config {tmp_exp_dir}/home/\n"
+        script += f"rsync -avz $HOME/.netrc {tmp_exp_dir}/home/\n"
+        script += f"rsync -avz $HOME/.ssh {tmp_exp_dir}/home/\n"
+
+        return script
+
+    def _create_sbatch_launch_script(
+        self, compute_script_path: Path, persistent_key: str
+    ) -> str:
+        script = f"cd {self.cluster_shared_storage_dir}\n"
+        if not self.interactive:
+            script += 'echo "Submitting the job..." \n'
+            script += f"sbatch --wait {self.slurm_args} {compute_script_path} \n"
+        else:
+            script += 'printf "\\n\\n--------------------------------------------------\\n"; \n'
+            script += (
+                'printf "Run the following command once the job is granted:\\n"; \n'
+            )
+            script += f'echo "$ {compute_script_path}";\n'
+            script += 'echo "--------------------------------------------------"; \n'
+            account_str = f"--account={args.account}" if args.account else ""
+            script += f"salloc {args.slurm_args} {account_str}\n"
+        return script
+
+    def _create_post_sbatch_launch_script(
+        self, tmp_exp_dir: Path, persistent_key: str
+    ) -> str:
+        # script = f'echo "Cleaning up..."\n'
+        # script += f"rm -rf {tmp_exp_dir}\n"
+        script = ""
+        return script
+
+    def _create_notify_script(
+        self, job_body: Dict[str, Any], persistent_key: str
+    ) -> str:
+        return ""
+
+    def create_compute_script(self, tmp_exp_dir: Path, persistent_key: str) -> str:
+        script = "#!/bin/bash\n"
+        script += f"#SBATCH -o {self.log_dir}/compute_log.txt\n"
+        if self.account is not None:
+            script += f"#SBATCH --account={self.account}\n"
+
+        script += "\nsleep 5 \n"
+
+        script += f'echo "Uploading contents to compute node..." \n'
+        script += f"rsync -azP {tmp_exp_dir}/* {self.compute_node_storage_dir} \n\n"
+
+        image_path = self.singularity_image_library_path / self.image_name
+        script += f'echo "Copying container {image_path} to compute node..." \n'
+        script += f"rsync -avzP {image_path} {self.compute_node_storage_dir}/ \n\n"
+
+        stdout_path = f"{self.cluster_shared_storage_dir}/experiments/{self.project_name}/{self.launcher_id}/stdout.txt"
+        stderr_path = f"{self.cluster_shared_storage_dir}/experiments/{self.project_name}/{self.launcher_id}/stderr.txt"
+        script += f"touch {stdout_path} \n"
+        script += f"touch {stderr_path} \n\n"
+
+        script += "export TRANSFORMERS_CACHE=~/experiments/hf_cache\n"
+        script += "export HF_DATASETS_CACHE=~/experiments/hf_ds_cache\n"
+        script += "export HF_MODULES_CACHE=~/experiments/hf_modules_cache\n"
+        script += "export WANDB_CACHE_DIR=~/.wandb_cache_dir\n\n"
+
+        if self.wandb_offline:
+            script += "export WANDB_MODE=offline\n"
+
+        if self.transformers_offline:
+            script += "export TRANSFORMERS_OFFLINE=1\n"
+
+        if self.hf_datasets_offline:
+            script += "export HF_DATASETS_OFFLINE=1\n"
+
+        script += f'\necho "Running the computation..." \n'
+        script += "cd $HOME\n"
+        script += 'command -v "module" >/dev/null && module load singularity\n'
+
+        if not self.interactive:
+            script += "singularity exec --nv \\\n"
+            script += f"\t-H {self.compute_node_storage_dir}/home:$HOME \\\n"
+            script += f"\t-B {self.cluster_shared_storage_dir}/experiments:$HOME/experiments \\\n"
+            script += f"\t{self.compute_node_storage_dir}/{self.image_name} \\\n"
+            script += (
+                f"\t./{self.run_script_name} > {stdout_path} 2> {stderr_path} \n\n"
+            )
+        else:
+            script += "singularity shell --nv \\\n"
+            script += f"\t-H {self.compute_node_storage_dir}/home:$HOME \\\n"
+            script += f"\t-B {self.cluster_shared_storage_dir}/experiments:$HOME/experiments \\\n"
+            script += f"\t{self.compute_node_storage_dir}/{self.image_name} \n\n"
+
+        return script
+
+
+class ComputeCanadaCluster(SlurmComputingCluster):
+    def __init__(
+        self,
+        **kwargs,
+    ):
+        account = kwargs.pop("account", "rrg-bengioy-ad")
+        wandb_offline = kwargs.pop("wandb_offline", True)
+        transformers_offline = kwargs.pop("transformers_offline", True)
+        hf_datasets_offline = kwargs.pop("hf_datasets_offline", True)
+
+        super().__init__(
+            **kwargs,
+            shared_storage_dir="~/scratch",
+            account=account,
+            wandb_offline=wandb_offline,
+            transformers_offline=transformers_offline,
+            hf_datasets_offline=hf_datasets_offline,
+        )
+
+    def _create_post_sbatch_launch_script(
+        self, tmp_exp_dir: Path, persistent_key: str
+    ) -> str:
+        script = super()._create_post_sbatch_launch_script(tmp_exp_dir, persistent_key)
+
+        script += "\n\n"
+        script += 'if [ ! -d "$HOME/.wandb_cache_dir" ]; then\n'
+        script += "\tmv $HOME/.wandb_cache_dir $HOME/.wandb_cache_dir.back\n"
+        script += "fi\n\n"
+
+        script += f"ln -sfn {self.cluster_shared_storage_dir}/experiments/wandb_cache_dir $HOME/.wandb_cache_dir\n"
+        script += "export WANDB_CACHE_DIR=$HOME/.wandb_cache_dir\n"
+        script += (
+            f"find {self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/wandb/ "
+            f'-maxdepth 1 -type d -name "offline*" '
+            f"-exec wandb sync --mark-synced --no-include-synced {{}} \; "
+            f"-exec sleep 5s \;\n\n"
+        )
+
+        script += (
+            f"find {self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/ "
+            f'-name "*.bin" -type f -delete\n'
+        )
+
+        script += (
+            f"find {self.cluster_shared_storage_dir}/experiments/{self.project_name}/{persistent_key}/ "
+            f'-name "*.pt" -type f -delete\n\n'
+        )
+
+        script += 'if [ ! -d "$HOME/.wandb_cache_dir.back" ]; then\n'
+        script += "\trm $HOME/.wandb_cache_dir\n"
+        script += "\tmv $HOME/.wandb_cache_dir.back $HOME/.wandb_cache_dir\n"
+        script += "fi\n\n"
+
+        return script
+
+
+class MilaCluster(ComputeCanadaCluster):
+    def __init__(self, **kwargs):
+        wandb_offline = kwargs.pop("wandb_offline", False)
+        transformers_offline = kwargs.pop("transformers_offline", False)
+        hf_datasets_offline = kwargs.pop("hf_datasets_offline", False)
+        super().__init__(
+            **kwargs,
+            wandb_offline=wandb_offline,
+            transformers_offline=transformers_offline,
+            hf_datasets_offline=hf_datasets_offline,
+        )
+
+
+def get_config() -> Dict[str, Union[str, bool]]:
+    config_obj = {}
+    return config_obj
+
+
+def launch_job(args: argparse.Namespace) -> None:
+    if args.platform == "mila":
+        cluster_class = MilaCluster
+    elif args.platform == "cc":
+        cluster_class = ComputeCanadaCluster
+    else:
+        raise ValueError()
+
+    cluster_kwargs = vars(args)
+    for k in list(cluster_kwargs.keys()):
+        if cluster_kwargs[k] is None:
+            del cluster_kwargs[k]
+
+    config_obj = get_config()
+
+    clstr_args = copy.deepcopy(cluster_kwargs)
+    clstr_args.update({"launcher_id": args.bundle})
+    clstr = cluster_class(**clstr_args)
+
+    clstr.execute_job(None)
+
+
+def get_queued_jobs() -> List[Tuple[str, str, str]]:
+    user = os.environ.get("USER")
+    cmd = f"squeue -u {user} -o %A,%j,%T --noheader"
+    output = subprocess.check_output(shlex.split(cmd)).decode("utf-8")
+    jobs = []
+    for line in output.splitlines():
+        job_id, job_name, state = line.split(",")
+        launcher_id = job_name.split("_compute.sh")[0]
+        jobs.append((job_id, launcher_id, state))
+    return jobs
+
+
+def print_info(args: argparse.Namespace):
+    jobs = get_queued_jobs()
+    if len(jobs) == 0:
+        print("No jobs in queue")
+        return
+
+    jobs.sort(key=lambda x: x[1])
+
+    import wandb
+
+    project = os.environ.get("WANDB_PROJECT", "comp-gen_v2")
+    api = wandb.Api(overrides={"project": project})
+
+    for i, (job_id, launcher_id, state) in enumerate(jobs):
+        print("\n\n----------------------------------------")
+        print(f"{i + 1}: Job {job_id}, LauncherID {launcher_id} is in state {state}")
+        print("\tcd ~/sbatch_logs/{launcher_ids} && ls -lha")
+        try:
+            launcher_run = api.run(f"{project}/{launcher_id}")
+        except Exception as e:
+            print(f"Error: {e}")
+            continue
+
+        group = launcher_run.group
+        if group is None:
+            continue
+
+        print("\tGroup: ", group)
+        print("\tLink: ", launcher_run.url)
+        is_sweep = launcher_run.job_type == "agent"
+
+        runs = api.runs(
+            f"{project}",
+            {
+                "$and": [
+                    {"group": group},
+                ],
+            },
+        )
+        runs = list(runs)
+        print(f"\tis_sweep: {is_sweep}, #runs: {len(runs)}")
+
+        if is_sweep:
+            sweep_runs = [run for run in runs if run.job_type == "hp_exp"]
+            if len(sweep_runs) == 0:
+                print("\tNo sweep runs")
+                continue
+
+            sweep = sweep_runs[0].sweep
+            print("\tSweep URL: ", sweep.url)
+
+
+def main(args):
+    if args.info:
+        print_info(args)
+        return
+
+    if args.bundle is not None:
+        if "," not in args.bundle:
+            bundles = [args.bundle]
+        else:
+            bundles = args.bundle.split(",")
+            bundles = [b.strip() for b in bundles if b != ""]
+    else:
+        bundles = [None]
+
+    queued_jobs = []
+    if args.nodup:
+        try:
+            queued_jobs = get_queued_jobs()
+            print(f"Queued jobs:")
+            from pprint import pprint
+
+            pprint(queued_jobs)
+        except subprocess.CalledProcessError as e:
+            print("Could not get queued jobs")
+            print(e)
+
+    already_launched = set([job[1] for job in queued_jobs])
+
+    print("Bundles:", bundles)
+    for bundle in bundles:
+        if args.nodup and bundle in already_launched:
+            print(f"Skipping {bundle} because it is already queued")
+            continue
+
+        args.bundle = bundle
+
+        launch_job(args)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Experiment runner")
+
+    parser.add_argument(
+        "bundle", metavar="EXP_KEY", nargs="?", type=str, help="Wandb ID"
+    )
+
+    parser.add_argument(
+        "-p",
+        "--platform",
+        metavar="PLATFORM",
+        type=str,
+        choices=["mila", "cc", "aws"],
+        default="mila",
+        help="The computation platform we're running the experiment",
+    )
+
+    parser.add_argument(
+        "-s",
+        "--slurm_args",
+        metavar="ARGS",
+        type=str,
+        default="--gres=gpu:1",
+        help="Slurm args",
+    )
+
+    parser.add_argument(
+        "-i", "--image_name", metavar="IMAGE", type=str, help="Container Image"
+    )
+
+    parser.add_argument(
+        "--images_dir",
+        metavar="DIR",
+        type=str,
+        help="Container Images Directory (only needed for singularity)",
+    )
+
+    parser.add_argument(
+        "--shared_storage_dir",
+        metavar="DIR",
+        type=str,
+        help="Path to platform's long-term storage",
+    )
+
+    parser.add_argument(
+        "--compute_storage_dir",
+        metavar="DIR",
+        type=str,
+        help="Platform's node storage (short-term)",
+    )
+
+    parser.add_argument(
+        "--account",
+        metavar="ACCOUNT",
+        type=str,
+        help="Slurm account (only needed for CC)",
+    )
+
+    parser.add_argument(
+        "--scripts-dir",
+        metavar="DIR",
+        type=str,
+        help="Directory to output generated job scripts",
+    )
+
+    parser.add_argument(
+        "--logs-dir",
+        metavar="DIR",
+        type=str,
+        help="Directory to store jobs' log",
+    )
+
+    parser.add_argument(
+        "--env",
+        metavar="ENVS",
+        type=str,
+        help="Environment variables passed to the container, e.g. X1=V1,x2=V2",
+    )
+
+    parser.add_argument(
+        "--max_number_tasks",
+        metavar="NUM_TASKS",
+        type=int,
+        default=-1,
+        help="Maximum number of tasks to submit. Set -1 to ignore",
+    )
+
+    parser.add_argument(
+        "--delay_between_submissions",
+        metavar="SECONDS",
+        type=int,
+        default=5,
+        help="The delay between job submissions",
+    )
+
+    parser.add_argument(
+        "--dry_run",
+        action="store_true",
+        default=False,
+        help="Don't remove the launched jobs from the queue (Useful for testing and debugging).",
+    )
+
+    parser.add_argument(
+        "--exit_if_no_jobs",
+        action="store_true",
+        default=False,
+        help="Exit if no jobs are found in the queue.",
+    )
+
+    parser.add_argument(
+        "--skip_aws_configure",
+        action="store_true",
+        default=False,
+        help="Skip AWS configure (useful if reading from env variables)",
+    )
+
+    parser.add_argument(
+        "--nodup",
+        action="store_true",
+        help="Do not run already queued the experiment",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--info",
+        action="store_true",
+        help="Print queued experiments' info",
+        default=False,
+    )
+
+    args = parser.parse_args()
+
+    main(args)

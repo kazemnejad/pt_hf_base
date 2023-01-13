@@ -357,8 +357,7 @@ def make_run_script_sweep_manual_agent(
     script += f"\nexport SWEEP_NAME={sweep_name}\n"
     script += f"export SWEEP_CONFIGS='{sweep_configs}'\n"
     script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
-    script += f"export WANDB_DIR=experiments/$SWEEP_NAME\n"
-    script += f"export WANDB_TAGS=launched_by_{exp_key}\n"
+    script += f"export WANDB_TAGS=sweep,manual_sweep,launched_by_{exp_key}\n"
     script += f"mkdir -p $WANDB_DIR\n"
 
     script += f"ln -srnf experiments/$SWEEP_NAME experiments/{exp_name}/$SWEEP_NAME\n"
@@ -531,6 +530,7 @@ def main(args: argparse.Namespace):
             args=args,
         )
     elif args.sweep_configs is not None:
+        exp_name = args.sweep_name
         run_script_path = make_run_script_sweep_manual_agent(
             configs,
             args.commands,
