@@ -434,6 +434,9 @@ def launch_job(args: argparse.Namespace) -> None:
 
     clstr_args = copy.deepcopy(cluster_kwargs)
     clstr_args.update({"launcher_id": args.bundle})
+    if "project_name" not in clstr_args:
+        clstr_args["project_name"] = os.environ.get("WANDB_PROJECT", "pt_hf_base")
+
     clstr = cluster_class(**clstr_args)
 
     clstr.execute_job(None)
@@ -461,7 +464,7 @@ def print_info(args: argparse.Namespace):
 
     import wandb
 
-    project = os.environ.get("WANDB_PROJECT", "comp-gen_v2")
+    project = os.environ.get("WANDB_PROJECT", "pt_hf_base")
     api = wandb.Api(overrides={"project": project})
 
     for i, (job_id, launcher_id, state) in enumerate(jobs):
