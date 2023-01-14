@@ -153,6 +153,7 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
                 with_indices=True,
                 load_from_cache_file=False,
                 keep_in_memory=True,
+                desc="Adding index",
             )
 
         ds = self._build_tokenized_dataset(stage, ds, tokenize=tokenize)
@@ -198,6 +199,7 @@ class Seq2SeqDataLoaderFactory(DataLoaderFactory):
                 num_proc=min(os.cpu_count(), 4),
                 load_from_cache_file=False,
                 keep_in_memory=True,
+                desc="Tokenizing dataset",
             )
 
         if (
