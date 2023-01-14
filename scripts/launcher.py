@@ -105,7 +105,7 @@ class SlurmComputingCluster(ComputingCluster):
         self.log_dir = Path(self.global_logs_dir) / f"lid_{launcher_id}"
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.script_dir = Path(self.global_scripts_dir) / f"lid_{launcher_id}"
+        self.script_dir = Path(self.global_scripts_dir)
         self.script_dir.mkdir(parents=True, exist_ok=True)
 
         self.image_name = image_name
@@ -218,7 +218,7 @@ class SlurmComputingCluster(ComputingCluster):
 
         persistent_key = self.prepare_job(tmp_exp_dir / "home")
         compute_script = self.create_compute_script(tmp_exp_dir, persistent_key)
-        compute_script_path = self.script_dir / "compute.sh"
+        compute_script_path = self.script_dir / f"{self.launcher_id}_compute.sh"
         save_and_make_executable(compute_script_path, compute_script)
 
         login_script = self._create_pre_sbatch_launch_script(
@@ -232,7 +232,7 @@ class SlurmComputingCluster(ComputingCluster):
         )
         login_script += self._create_notify_script(job_body, persistent_key)
 
-        login_script_path = self.script_dir / f"login.sh"
+        login_script_path = self.script_dir / f"{self.launcher_id}_login.sh"
         save_and_make_executable(login_script_path, login_script)
 
         return login_script_path
