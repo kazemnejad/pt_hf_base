@@ -393,6 +393,7 @@ class Seq2SeqRuntime(Runtime):
         training_args["report_to"] = "none"
 
         _ = training_args.pop("target_batch_size", None)
+        _ = training_args.pop("target_eval_batch_size", None)
         _ = training_args.pop("auto_compute_batch_size", None)
 
         if kwargs.get("eval_dataset", None) is None:
