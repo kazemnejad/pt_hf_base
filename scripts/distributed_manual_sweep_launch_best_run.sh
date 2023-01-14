@@ -10,6 +10,14 @@ CONFIGS_STR="best_run.json,configs/hp_base.jsonnet,configs/final.jsonnet"
 
 SEEDS="256788 234054 146317"
 
+set -e
+
+python scripts/manual_sweep.py \
+  --sweep_name $SWEEP_NAME \
+  --sweep_root_dir $SWEEP_ROOT_DIR \
+  --sweep_configs $SWEEP_CONFIGS \
+  fail_if_sweep_not_complete
+
 RUN_ID_PREFIX=$(python scripts/manual_sweep.py \
   --sweep_name $SWEEP_NAME \
   --sweep_root_dir "$SWEEP_ROOT_DIR" \
