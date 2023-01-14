@@ -353,7 +353,6 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         wandb_offline = kwargs.pop("wandb_offline", True)
         transformers_offline = kwargs.pop("transformers_offline", True)
         hf_datasets_offline = kwargs.pop("hf_datasets_offline", True)
-
         super().__init__(
             **kwargs,
             shared_storage_dir="~/scratch",
@@ -413,7 +412,7 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         return script
 
 
-class MilaCluster(ComputeCanadaCluster):
+class MilaCluster(SlurmComputingCluster):
     def __init__(self, **kwargs):
         wandb_offline = kwargs.pop("wandb_offline", False)
         transformers_offline = kwargs.pop("transformers_offline", False)
