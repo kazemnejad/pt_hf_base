@@ -248,7 +248,7 @@ class Seq2SeqRuntime(Runtime):
                 self.logger.summary["computed_num_process"] = num_devices
 
         if "target_eval_batch_size" in self.training_args:
-            target_batch_size = self.training_args["target_batch_size"]
+            target_batch_size = self.training_args["target_eval_batch_size"]
             world_size = os.environ.get("WORLD_SIZE", None)
             if world_size is not None:
                 num_devices = int(world_size)
