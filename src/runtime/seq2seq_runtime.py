@@ -217,17 +217,26 @@ class Seq2SeqRuntime(Runtime):
 
         self.analyzers = analyzers or []
 
-        if "target_batch_size" in self.training_args:
-            target_batch_size = self.training_args["target_batch_size"]
+        def get_num_devices() -> int:
             world_size = os.environ.get("WORLD_SIZE", None)
-            if world_size is not None:
+            if world_size is not None and "RANK" in os.environ:
                 num_devices = int(world_size)
             else:
                 # Multi GPU training should be always launched by torchrun,
                 # otherwise we assume single GPU training (even if there are
                 # multiple GPUs available)
                 num_devices = 1
+                if gpu_utils.get_num_gpus() > 1:
+                    logger.warning(
+                        "You seem to be running on multiple GPUs. "
+                        "If you want to use multiple GPUs, please use torchrun."
+                    )
 
+            return num_devices
+
+        if "target_batch_size" in self.training_args:
+            target_batch_size = self.training_args["target_batch_size"]
+            num_devices = get_num_devices()
             num_devices = max(num_devices, 1)
 
             self.training_args["per_device_train_batch_size"] = (
@@ -249,15 +258,7 @@ class Seq2SeqRuntime(Runtime):
 
         if "target_eval_batch_size" in self.training_args:
             target_batch_size = self.training_args["target_eval_batch_size"]
-            world_size = os.environ.get("WORLD_SIZE", None)
-            if world_size is not None:
-                num_devices = int(world_size)
-            else:
-                # Multi GPU training should be always launched by torchrun,
-                # otherwise we assume single GPU training (even if there are
-                # multiple GPUs available)
-                num_devices = 1
-
+            num_devices = get_num_devices()
             num_devices = max(num_devices, 1)
 
             self.training_args["per_device_eval_batch_size"] = (
