@@ -12,6 +12,9 @@ if [ -z "$SWEEP_NAME" ]; then
   exit 1
 fi
 
+# Exit when any command fails
+set -e
+
 export APP_LAUNCHED_BY_MANUAL_SWEEPER=1
 export APP_MANUAL_SWEEP=1
 
@@ -23,7 +26,6 @@ python scripts/manual_sweep.py \
 
 # Create sweep config files
 # This script dumps the config files into $SWEEP_ROOT_DIR/hyperparameters dir
-rm $SWEEP_ROOT_DIR/hyperparameters/*.json
 python scripts/manual_sweep.py \
   --sweep_name $SWEEP_NAME \
   --sweep_root_dir $SWEEP_ROOT_DIR \
