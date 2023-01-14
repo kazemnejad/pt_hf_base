@@ -1,4 +1,5 @@
 import copy
+import datetime
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ from typing import Dict, Optional, Any, List
 import _jsonnet
 import numpy as np
 import torch
+import torch.distributed as dist
 import transformers
 import wandb
 from overrides import overrides
@@ -221,14 +223,10 @@ class Seq2SeqRuntime(Runtime):
             if world_size is not None:
                 num_devices = int(world_size)
             else:
-                if torch.cuda.is_available():
-                    num_gpus = gpu_utils.get_num_gpus()
-                    if num_gpus == -1:
-                        num_devices = torch.cuda.device_count()
-                    else:
-                        num_devices = num_gpus
-                else:
-                    num_devices = 1
+                # Multi GPU training should be always launched by torchrun,
+                # otherwise we assume single GPU training (even if there are
+                # multiple GPUs available)
+                num_devices = 1
 
             num_devices = max(num_devices, 1)
 
@@ -247,6 +245,36 @@ class Seq2SeqRuntime(Runtime):
                 self.logger.summary[
                     "computed_per_device_train_batch_size"
                 ] = self.training_args["per_device_train_batch_size"]
+                self.logger.summary["computed_num_process"] = num_devices
+
+        if "target_eval_batch_size" in self.training_args:
+            target_batch_size = self.training_args["target_batch_size"]
+            world_size = os.environ.get("WORLD_SIZE", None)
+            if world_size is not None:
+                num_devices = int(world_size)
+            else:
+                # Multi GPU training should be always launched by torchrun,
+                # otherwise we assume single GPU training (even if there are
+                # multiple GPUs available)
+                num_devices = 1
+
+            num_devices = max(num_devices, 1)
+
+            self.training_args["per_device_eval_batch_size"] = (
+                target_batch_size // num_devices
+            )
+
+            logger.info(f"Target eval batch size: {target_batch_size}")
+            logger.info(f"Number of compute devices: {num_devices}")
+            logger.info(
+                f"Setting per_device_eval_batch_size "
+                f"to {self.training_args['per_device_eval_batch_size']}"
+            )
+
+            if is_world_process_zero():
+                self.logger.summary[
+                    "computed_per_device_eval_batch_size"
+                ] = self.training_args["per_device_eval_batch_size"]
                 self.logger.summary["computed_num_process"] = num_devices
 
     def write_meta_data(self):
@@ -343,9 +371,7 @@ class Seq2SeqRuntime(Runtime):
                 _ = model_kwargs.pop("tokenizer")
 
             logger.info(f"Loading initial model weights from {arg}...")
-            model = model_class.from_pretrained(
-                arg, **model_kwargs
-            )
+            model = model_class.from_pretrained(arg, **model_kwargs)
         else:
             model = model_constructor(**model_kwargs)
             has_handled_tokenizer = True
@@ -595,13 +621,21 @@ class Seq2SeqRuntime(Runtime):
                         eval_split_name=eval_split,
                     )
 
+                    last_checkpoint = self.get_last_checkpoint_path()
+
+                    # Make sure all distributed processes are in sync
+                    if dist.is_available() and dist.is_initialized():
+                        dist.monitored_barrier(
+                            timeout=datetime.timedelta(minutes=15), wait_all_ranks=True
+                        )
+
             if trainer.is_world_process_zero():
                 self.logger.summary["auto_computed_batch_size"] = self.training_args[
                     "per_device_train_batch_size"
                 ]
                 self.logger.summary[
                     "auto_computed_grad_acc_steps"
-                ] = self.training_args["gradient_accumulation_steps"]
+                ] = self.training_args.get("gradient_accumulation_steps", 1)
 
             self.training_args = orig_training_args
 
@@ -665,29 +699,32 @@ class Seq2SeqRuntime(Runtime):
         if "load_best_model_at_end" in self.training_args:
             self.training_args.pop("load_best_model_at_end")
 
-        trainer = self.create_trainer(ExperimentStage.PREDICTION)
-        if load_best:
-            try:
-                best_ckpt_path = self._load_best_checkpoint(trainer)
-                if trainer.is_world_process_zero():
-                    self.logger.summary.update(
-                        {f"predict_{split}_ckpt_path": f"best at {best_ckpt_path}"}
-                    )
-            except:
+        def load_trainer():
+            if load_best:
+                try:
+                    best_ckpt_path = self._load_best_checkpoint(trainer)
+                    if trainer.is_world_process_zero():
+                        self.logger.summary.update(
+                            {f"predict_{split}_ckpt_path": f"best at {best_ckpt_path}"}
+                        )
+                except:
+                    logger.info("Loading last checkpoint...")
+                    last_ckpt_path = self._load_last_checkpoint(trainer)
+                    if trainer.is_world_process_zero():
+                        self.logger.summary.update(
+                            {f"predict_{split}_ckpt_path": f"last at {last_ckpt_path}"}
+                        )
+            else:
                 logger.info("Loading last checkpoint...")
+                self._load_last_checkpoint(trainer)
                 last_ckpt_path = self._load_last_checkpoint(trainer)
                 if trainer.is_world_process_zero():
                     self.logger.summary.update(
                         {f"predict_{split}_ckpt_path": f"last at {last_ckpt_path}"}
                     )
-        else:
-            logger.info("Loading last checkpoint...")
-            self._load_last_checkpoint(trainer)
-            last_ckpt_path = self._load_last_checkpoint(trainer)
-            if trainer.is_world_process_zero():
-                self.logger.summary.update(
-                    {f"predict_{split}_ckpt_path": f"last at {last_ckpt_path}"}
-                )
+
+        trainer = self.create_trainer(ExperimentStage.PREDICTION)
+        load_trainer()
 
         stage = ExperimentStage.PREDICTION
         ds_path = self.dl_factory.get_ds_file_path(ExperimentStage.from_split(split))
@@ -696,7 +733,57 @@ class Seq2SeqRuntime(Runtime):
             logger.error(f"No dataset found for split = {split}")
             return
 
-        test_results = trainer.predict(dataset, metric_key_prefix=f"pred_{split}")
+        auto_compute_batch_size = self.training_args.get(
+            "auto_compute_batch_size", False
+        )
+        if not auto_compute_batch_size:
+            test_results = trainer.predict(dataset, metric_key_prefix=f"pred_{split}")
+        else:
+            # Compute the maximum batch size fits into the gpu
+            # and instead increase gradient accumulation steps
+            prediction_is_done = False
+            orig_training_args = copy.deepcopy(self.training_args)
+            while not prediction_is_done:
+                try:
+                    test_results = trainer.predict(
+                        dataset, metric_key_prefix=f"pred_{split}"
+                    )
+                    prediction_is_done = True
+                except RuntimeError as e:
+                    if "out of memory" not in str(e):
+                        raise e
+
+                    # Divide the batch_size in half
+                    curr_batch_size = self.training_args["per_device_eval_batch_size"]
+                    self.training_args["per_device_eval_batch_size"] = (
+                        curr_batch_size // 2
+                    )
+
+                    logger.info(
+                        f"Eval Batch size is too large. Reducing it to "
+                        f"{self.training_args['per_device_train_batch_size']} "
+                    )
+
+                    # Empty the cache
+                    torch.cuda.empty_cache()
+
+                    # Recreate the trainer with the new batch size
+                    trainer = self.create_trainer(ExperimentStage.PREDICTION)
+
+                    load_trainer()
+
+                    # Make sure all distributed processes are in sync
+                    if dist.is_available() and dist.is_initialized():
+                        dist.monitored_barrier(
+                            timeout=datetime.timedelta(minutes=15), wait_all_ranks=True
+                        )
+
+            if trainer.is_world_process_zero():
+                self.logger.summary[
+                    "auto_computed_batch_size_eval"
+                ] = self.training_args["per_device_eval_batch_size"]
+
+            self.training_args = orig_training_args
 
         if trainer.is_world_process_zero():
             metrics = test_results.metrics
