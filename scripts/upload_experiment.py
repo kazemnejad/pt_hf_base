@@ -356,6 +356,7 @@ def make_run_script_sweep_manual_agent(
 
     script += f"\nexport SWEEP_NAME={sweep_name}\n"
     script += f"export SWEEP_CONFIGS='{sweep_configs}'\n"
+    script += f"export CAPTURE_LOG=1\n"
     script += f"export SWEEP_ROOT_DIR=experiments/$SWEEP_NAME\n"
     script += f"mkdir -p $SWEEP_ROOT_DIR\n"
 

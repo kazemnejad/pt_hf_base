@@ -35,6 +35,9 @@ python scripts/manual_sweep.py \
 SWEEP_PROGRAM=$(python scripts/read_json_field.py "sweep_cfg.json" "program")
 chmod +x $SWEEP_PROGRAM
 
+mkdir -p $SWEEP_ROOT_DIR/exps
+mkdir -p $SWEEP_ROOT_DIR/console_logs
+
 # Iterate over $SWEEP_ROOT_DIR/hyperparameters and run the experiments
 for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
   RUN_NAME=$(basename $CONFIG_FILE .json)
@@ -60,7 +63,17 @@ for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
     --sweep_configs $SWEEP_CONFIGS \
     generate_deterministic_run_id --run_name $RUN_NAME)
 
-  APP_MANUAL_SWEEP_HYPERPARAMETER_FILE=$CONFIG_FILE APP_SWEEP_ROOT_DIR=$SWEEP_ROOT_DIR RUN_ID=$RUN_ID ./$SWEEP_PROGRAM
+  if [ -z "$CAPTURE_LOG" ]; then
+    APP_MANUAL_SWEEP_HYPERPARAMETER_FILE=$CONFIG_FILE APP_SWEEP_ROOT_DIR=$SWEEP_ROOT_DIR RUN_ID=$RUN_ID ./$SWEEP_PROGRAM
+  else
+    stderr_file=$SWEEP_ROOT_DIR/console_logs/"${RUN_NAME}_stderr.log"
+    stdout_file=$SWEEP_ROOT_DIR/console_logs/"${RUN_NAME}_stdout.log"
+    touch $stderr_file
+    touch $stdout_file
+    echo "=========> [Manual Sweeper] Capturing console logs to $stderr_file and $stdout_file"
+    APP_MANUAL_SWEEP_HYPERPARAMETER_FILE=$CONFIG_FILE APP_SWEEP_ROOT_DIR=$SWEEP_ROOT_DIR RUN_ID=$RUN_ID ./$SWEEP_PROGRAM 2>$stderr_file 1>$stdout_file
+  fi
+
 done
 
 python scripts/manual_sweep.py \
