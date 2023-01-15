@@ -420,7 +420,7 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         worker_script += "./run.sh\n\n"
 
         worker_script += f"mkdir -p experiments/{persistent_key}/\n"
-        worker_script += f"rm -r experiments/{persistent_key}/wandb\n"
+        worker_script += f"rm -r experiments/{persistent_key}/wandb || true\n"
         worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
 
         save_and_make_executable(output_dir / self.run_script_name, worker_script)
