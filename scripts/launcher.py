@@ -190,7 +190,11 @@ class SlurmComputingCluster(ComputingCluster):
         login_script_path = self.create_launch_script(job_body)
 
         if self.interactive:
-            subprocess.check_call([login_script_path])
+            try:
+                subprocess.check_call([login_script_path])
+            except subprocess.CalledProcessError as e:
+                print(e)
+                print("Exiting...")
         else:
             print("Started executing...")
             print("To check all logs, visit this directory:")
