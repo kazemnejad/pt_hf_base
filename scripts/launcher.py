@@ -464,14 +464,14 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         #     f"find {self.experiments_dir}/{persistent_key}/ "
         #     f'-name "*.pt" -type f -delete\n\n'
         # )
+        script += "rm ~/.wandb_cache_dir\n"
+        script += "rm ~/experiments\n\n"
 
         script += 'if test -v moved_wandb_cache; then\n'
-        script += "\trm ~/.wandb_cache_dir\n"
         script += "\tmv ~/.wandb_cache_dir.back ~/.wandb_cache_dir\n"
         script += "fi\n\n"
 
         script += 'if test -v moved_experiment; then\n'
-        script += "\trm ~/experiments\n"
         script += "\tmv ~/experiments.back ~/experiments\n"
         script += "fi\n\n"
 
