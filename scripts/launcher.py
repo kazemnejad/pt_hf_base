@@ -446,6 +446,7 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         script += "fi\n\n"
 
         script += f"ln -sfn {self.experiments_dir}/wandb_cache_dir ~/.wandb_cache_dir\n"
+        script += f"ln -sfn {self.experiments_dir} ~/experiments\n"
         script += "export WANDB_CACHE_DIR=~/.wandb_cache_dir\n"
         script += (
             f"find {self.experiments_dir}/{persistent_key}/wandb/ "
