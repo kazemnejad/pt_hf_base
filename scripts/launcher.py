@@ -452,7 +452,7 @@ class ComputeCanadaCluster(SlurmComputingCluster):
             f"find {self.experiments_dir}/{persistent_key}/wandb/ "
             f'-maxdepth 1 -type d -name "offline*" '
             f"-exec wandb sync --mark-synced --no-include-synced {{}} \; "
-            f"-exec sleep 5s \;\n\n"
+            f"-exec sleep 1s \;\n\n"
         )
 
         # script += (
