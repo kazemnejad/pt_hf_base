@@ -362,6 +362,66 @@ class ComputeCanadaCluster(SlurmComputingCluster):
             hf_datasets_offline=hf_datasets_offline,
         )
 
+    def prepare_job(self, output_dir: Path) -> str:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        import wandb
+
+        project = os.environ.get("WANDB_PROJECT", "pt_hf_base")
+        user = os.environ.get("WANDB_USER", None)
+        api = wandb.Api(overrides={"project": project})
+        if user is not None:
+            artifact_name = f"{user}/{project}/"
+        else:
+            artifact_name = ""
+
+        artifact_name += f"bundle-{self.launcher_id}:latest"
+        artifact = api.artifact(artifact_name)
+        artifact.download(str(output_dir))
+
+        if "data" in artifact.metadata:
+            data_art_name = artifact.metadata["data"]
+            if ":" not in data_art_name:
+                data_art_name += ":latest"
+
+            data_artifact = api.artifact(data_art_name)
+            data_dir = output_dir / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            data_artifact.download(str(data_dir))
+
+        try:
+            metadata_path = output_dir / "metadata.json"
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+            persistent_key = metadata["exp_name"]
+        except Exception as e:
+            print(
+                "Unable to load metadata.json, computing "
+                "persistent_dir based on launcher_id"
+            )
+            persistent_key = create_md5_hash(self.launcher_id)
+
+        worker_script = f"#!/bin/bash\n\n"
+        worker_script += "if test -v WANDB_CACHE_DIR; then\n"
+        worker_script += f"\tln -sfn experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
+        worker_script += "fi\n\n"
+
+        worker_script += "export WANDB_DIR=wandb_dir\n"
+        worker_script += "mkdir -p $WANDB_DIR\n\n"
+
+        worker_script += "chmod a+x scripts/sync_wandb_logs.sh\n"
+        worker_script += "./scripts/sync_wandb_logs.sh &\n"
+
+        worker_script += "chmod a+x run.sh\n"
+        worker_script += "./run.sh\n\n"
+
+        worker_script += f"mkdir -p experiments/{persistent_key}/\n"
+        worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
+
+        save_and_make_executable(output_dir / self.run_script_name, worker_script)
+
+        return persistent_key
+
     def _create_post_sbatch_launch_script(
         self, tmp_exp_dir: Path, persistent_key: str
     ) -> str:
