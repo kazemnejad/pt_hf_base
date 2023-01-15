@@ -414,12 +414,13 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         worker_script += "mkdir -p $WANDB_DIR\n\n"
 
         worker_script += "chmod a+x scripts/sync_wandb_logs.sh\n"
-        worker_script += "./scripts/sync_wandb_logs.sh &\n"
+        worker_script += f"./scripts/sync_wandb_logs.sh wandb_dir experiments/{persistent_key} &\n"
 
         worker_script += "chmod a+x run.sh\n"
         worker_script += "./run.sh\n\n"
 
         worker_script += f"mkdir -p experiments/{persistent_key}/\n"
+        worker_script += f"rm -r experiments/{persistent_key}/wandb\n"
         worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
 
         save_and_make_executable(output_dir / self.run_script_name, worker_script)
@@ -453,15 +454,15 @@ class ComputeCanadaCluster(SlurmComputingCluster):
             f"-exec sleep 5s \;\n\n"
         )
 
-        script += (
-            f"find {self.experiments_dir}/{persistent_key}/ "
-            f'-name "*.bin" -type f -delete\n'
-        )
-
-        script += (
-            f"find {self.experiments_dir}/{persistent_key}/ "
-            f'-name "*.pt" -type f -delete\n\n'
-        )
+        # script += (
+        #     f"find {self.experiments_dir}/{persistent_key}/ "
+        #     f'-name "*.bin" -type f -delete\n'
+        # )
+        #
+        # script += (
+        #     f"find {self.experiments_dir}/{persistent_key}/ "
+        #     f'-name "*.pt" -type f -delete\n\n'
+        # )
 
         script += 'if test -v moved_wandb_cache; then\n'
         script += "\trm ~/.wandb_cache_dir\n"

@@ -903,7 +903,10 @@ class Seq2SeqRuntime(Runtime):
 
                 pred_table.add_data(idx, prompt, target, prediction, is_correct, diff)
 
-        self.logger.log({f"pred_{split}/model_outputs": pred_table})
+        if os.environ.get("WANDB_MODE", "online") != "offline":
+            # For some reason, this doesn't work in offline mode
+            self.logger.log({f"pred_{split}/model_outputs": pred_table})
+
         self.logger.save(str(combined_file.absolute()), policy="now")
 
         logger.info(f"Done combing!")
