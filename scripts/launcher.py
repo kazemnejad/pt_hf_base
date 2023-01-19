@@ -414,7 +414,9 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         worker_script += "mkdir -p $WANDB_DIR\n\n"
 
         worker_script += "chmod a+x scripts/sync_wandb_logs.sh\n"
-        worker_script += f"./scripts/sync_wandb_logs.sh wandb_dir experiments/{persistent_key} &\n"
+        worker_script += (
+            f"./scripts/sync_wandb_logs.sh wandb_dir experiments/{persistent_key} &\n"
+        )
 
         worker_script += "chmod a+x run.sh\n"
         worker_script += "./run.sh\n\n"
@@ -467,11 +469,11 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         script += "rm ~/.wandb_cache_dir\n"
         script += "rm ~/experiments\n\n"
 
-        script += 'if test -v moved_wandb_cache; then\n'
+        script += "if test -v moved_wandb_cache; then\n"
         script += "\tmv ~/.wandb_cache_dir.back ~/.wandb_cache_dir\n"
         script += "fi\n\n"
 
-        script += 'if test -v moved_experiment; then\n'
+        script += "if test -v moved_experiment; then\n"
         script += "\tmv ~/experiments.back ~/experiments\n"
         script += "fi\n\n"
 
@@ -491,9 +493,37 @@ class MilaCluster(SlurmComputingCluster):
         )
 
 
-def get_config() -> Dict[str, Union[str, bool]]:
-    config_obj = {}
-    return config_obj
+def get_config(required_keys: List[str]) -> Dict[str, Union[str, bool]]:
+    config_path = Path(__file__).parent / ".launcher_config.json"
+    if config_path.exists():
+        config_ob = json.load(config_path.open())
+    else:
+        config_ob = {}
+
+    try:
+        assert all(f in config_ob for f in required_keys)
+    except:
+        from InquirerPy import inquirer
+
+        key_to_message = {
+            "wandb_api_key": "Enter your wandb api key",
+        }
+        new_config_ob = {
+            k: inquirer.text(
+                message=key_to_message.get(k, f"Enter {k}"),
+            ).execute()
+            for k in required_keys
+        }
+        config_ob.update(new_config_ob)
+
+        with config_path.open("w") as f:
+            json.dump(
+                config_ob,
+                f,
+                indent=4,
+            )
+
+    return config_ob
 
 
 def launch_job(args: argparse.Namespace) -> None:
