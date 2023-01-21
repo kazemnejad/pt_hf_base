@@ -169,18 +169,18 @@ class SlurmComputingCluster(ComputingCluster):
             persistent_key = create_md5_hash(self.launcher_id)
 
         worker_script = f"#!/bin/bash\n\n"
-        worker_script += "if test -v WANDB_CACHE_DIR; then\n"
-        worker_script += f"\tln -sfn experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
-        worker_script += "fi\n\n"
+        # worker_script += "if test -v WANDB_CACHE_DIR; then\n"
+        # worker_script += f"\tln -sfn experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
+        # worker_script += "fi\n\n"
 
-        worker_script += "export WANDB_DIR=wandb_dir\n"
-        worker_script += "mkdir -p $WANDB_DIR\n\n"
+        # worker_script += "export WANDB_DIR=wandb_dir\n"
+        # worker_script += "mkdir -p $WANDB_DIR\n\n"
 
         worker_script += "chmod a+x run.sh\n"
         worker_script += "./run.sh\n\n"
 
-        worker_script += f"mkdir -p experiments/{persistent_key}/\n"
-        worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
+        # worker_script += f"mkdir -p experiments/{persistent_key}/\n"
+        # worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
 
         save_and_make_executable(output_dir / self.run_script_name, worker_script)
 
@@ -316,7 +316,8 @@ class SlurmComputingCluster(ComputingCluster):
         script += "export TRANSFORMERS_CACHE=~/experiments/hf_cache\n"
         script += "export HF_DATASETS_CACHE=~/experiments/hf_ds_cache\n"
         script += "export HF_MODULES_CACHE=~/experiments/hf_modules_cache\n"
-        script += "export WANDB_CACHE_DIR=~/.wandb_cache_dir\n\n"
+        script += f"export WANDB_CACHE_DIR={self.experiments_dir}/wandb_cache_dir\n"
+        script += f"export WANDB_DIR={self.experiments_dir}/{persistent_key}\n\n"
 
         if self.wandb_offline:
             script += "export WANDB_MODE=offline\n"
@@ -335,6 +336,7 @@ class SlurmComputingCluster(ComputingCluster):
             script += "singularity exec --nv \\\n"
             script += f"\t-H {self.compute_node_storage_dir}/home:$HOME \\\n"
             script += f"\t-B {self.experiments_dir}:$HOME/experiments \\\n"
+            script += f"\t-B {self.cluster_shared_storage_dir}:$HOME/{self.cluster_shared_storage_dir.name} \\\n"
             script += f"\t{self.compute_node_storage_dir}/{self.image_name} \\\n"
             script += (
                 f"\t./{self.run_script_name} > {stdout_path} 2> {stderr_path} \n\n"
@@ -343,6 +345,7 @@ class SlurmComputingCluster(ComputingCluster):
             script += "singularity shell --nv \\\n"
             script += f"\t-H {self.compute_node_storage_dir}/home:$HOME \\\n"
             script += f"\t-B {self.experiments_dir}:$HOME/experiments \\\n"
+            script += f"\t-B {self.cluster_shared_storage_dir}:$HOME/{self.cluster_shared_storage_dir.name} \\\n"
             script += f"\t{self.compute_node_storage_dir}/{self.image_name} \n\n"
 
         return script
@@ -406,24 +409,24 @@ class ComputeCanadaCluster(SlurmComputingCluster):
             persistent_key = create_md5_hash(self.launcher_id)
 
         worker_script = f"#!/bin/bash\n\n"
-        worker_script += "if test -v WANDB_CACHE_DIR; then\n"
-        worker_script += f"\tln -sfn experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
-        worker_script += "fi\n\n"
+        # worker_script += "if test -v WANDB_CACHE_DIR; then\n"
+        # worker_script += f"\tln -sfn experiments/wandb_cache_dir $WANDB_CACHE_DIR\n"
+        # worker_script += "fi\n\n"
 
-        worker_script += "export WANDB_DIR=wandb_dir\n"
-        worker_script += "mkdir -p $WANDB_DIR\n\n"
-
-        worker_script += "chmod a+x scripts/sync_wandb_logs.sh\n"
-        worker_script += (
-            f"./scripts/sync_wandb_logs.sh wandb_dir experiments/{persistent_key} &\n"
-        )
+        # worker_script += "export WANDB_DIR=wandb_dir\n"
+        # worker_script += "mkdir -p $WANDB_DIR\n\n"
+        #
+        # worker_script += "chmod a+x scripts/sync_wandb_logs.sh\n"
+        # worker_script += (
+        #     f"./scripts/sync_wandb_logs.sh wandb_dir experiments/{persistent_key} &\n"
+        # )
 
         worker_script += "chmod a+x run.sh\n"
         worker_script += "./run.sh\n\n"
 
-        worker_script += f"mkdir -p experiments/{persistent_key}/\n"
-        worker_script += f"rm -r experiments/{persistent_key}/wandb || true\n"
-        worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
+        # worker_script += f"mkdir -p experiments/{persistent_key}/\n"
+        # worker_script += f"rm -r experiments/{persistent_key}/wandb || true\n"
+        # worker_script += f"cp -r wandb_dir/* experiments/{persistent_key}/\n\n"
 
         save_and_make_executable(output_dir / self.run_script_name, worker_script)
 
@@ -437,19 +440,19 @@ class ComputeCanadaCluster(SlurmComputingCluster):
             return script
 
         script += "\n\n"
-        script += 'if [[ -e "~/.wandb_cache_dir" ]] ; then\n'
-        script += "\tmoved_wandb_cache=1\n"
-        script += "\tmv ~/.wandb_cache_dir ~/.wandb_cache_dir.back\n"
-        script += "fi\n\n"
+        # script += 'if [[ -e "~/.wandb_cache_dir" ]] ; then\n'
+        # script += "\tmoved_wandb_cache=1\n"
+        # script += "\tmv ~/.wandb_cache_dir ~/.wandb_cache_dir.back\n"
+        # script += "fi\n\n"
 
-        script += 'if [[ -e "~/experiments" ]] ; then\n'
-        script += "\tmoved_experiment=1\n"
-        script += "\tmv ~/experiments ~/experiments.back\n"
-        script += "fi\n\n"
+        # script += 'if [[ -e "~/experiments" ]] ; then\n'
+        # script += "\tmoved_experiment=1\n"
+        # script += "\tmv ~/experiments ~/experiments.back\n"
+        # script += "fi\n\n"
 
-        script += f"ln -sfn {self.experiments_dir}/wandb_cache_dir ~/.wandb_cache_dir\n"
-        script += f"ln -sfn {self.experiments_dir} ~/experiments\n"
-        script += "export WANDB_CACHE_DIR=~/.wandb_cache_dir\n"
+        # script += f"ln -sfn {self.experiments_dir}/wandb_cache_dir ~/.wandb_cache_dir\n"
+        # script += f"ln -sfn {self.experiments_dir} ~/experiments\n"
+        script += f"export WANDB_CACHE_DIR={self.experiments_dir}/wandb_cache_dir\n"
         script += (
             f"find {self.experiments_dir}/{persistent_key}/wandb/ "
             f'-maxdepth 1 -type d -name "offline*" '
@@ -466,16 +469,16 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         #     f"find {self.experiments_dir}/{persistent_key}/ "
         #     f'-name "*.pt" -type f -delete\n\n'
         # )
-        script += "rm ~/.wandb_cache_dir\n"
-        script += "rm ~/experiments\n\n"
-
-        script += "if test -v moved_wandb_cache; then\n"
-        script += "\tmv ~/.wandb_cache_dir.back ~/.wandb_cache_dir\n"
-        script += "fi\n\n"
-
-        script += "if test -v moved_experiment; then\n"
-        script += "\tmv ~/experiments.back ~/experiments\n"
-        script += "fi\n\n"
+        # script += "rm ~/.wandb_cache_dir\n"
+        # script += "rm ~/experiments\n\n"
+        #
+        # script += "if test -v moved_wandb_cache; then\n"
+        # script += "\tmv ~/.wandb_cache_dir.back ~/.wandb_cache_dir\n"
+        # script += "fi\n\n"
+        #
+        # script += "if test -v moved_experiment; then\n"
+        # script += "\tmv ~/experiments.back ~/experiments\n"
+        # script += "fi\n\n"
 
         return script
 
@@ -487,6 +490,7 @@ class MilaCluster(SlurmComputingCluster):
         hf_datasets_offline = kwargs.pop("hf_datasets_offline", False)
         super().__init__(
             **kwargs,
+            shared_storage_dir="~/scratch",
             wandb_offline=wandb_offline,
             transformers_offline=transformers_offline,
             hf_datasets_offline=hf_datasets_offline,
