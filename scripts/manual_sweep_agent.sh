@@ -38,6 +38,7 @@ chmod +x $SWEEP_PROGRAM
 mkdir -p $SWEEP_ROOT_DIR/exps
 mkdir -p $SWEEP_ROOT_DIR/console_logs
 
+shopt -s nullglob
 # Iterate over $SWEEP_ROOT_DIR/hyperparameters and run the experiments
 for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
   RUN_NAME=$(basename $CONFIG_FILE .json)
@@ -75,6 +76,7 @@ for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
   fi
 
 done
+shopt -s nullglob
 
 # Check if the SWEEP_CONFIGS was not equal to 'configs/sweeps/no_sweep.jsonnet
 # If it was, then we don't need to run the sweep completion script
