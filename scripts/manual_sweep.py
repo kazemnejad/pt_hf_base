@@ -112,6 +112,8 @@ def iter_sweep_params(sweep_config):
         p: v["values"] for p, v in sweep_config["parameters"].items()
     }
     items = sorted(sweep_params_dict.items(), key=lambda x: x[0])
+    if len(items) == 0:
+        return
     keys, values = zip(*items)
     sweep_params: List[Dict[str, Any]] = [
         dict(zip(keys, v)) for v in itertools.product(*values)
