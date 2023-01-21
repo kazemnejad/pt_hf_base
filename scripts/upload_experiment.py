@@ -65,10 +65,10 @@ def command_to_bash_str(
         script = (
             f"{prefix}torchrun --standalone --nnodes=1 --nproc_per_node=$NUM_GPUS \\\n"
         )
-        script += f"{prefix}\tsrc/main.py --configs '{configs_str}' \\\n"
+        script += f'{prefix}\tsrc/main.py --configs "{configs_str}" \\\n'
         script += f"{prefix}\t\t{cmd}\n\n"
     else:
-        script = f"{prefix}python src/main.py --configs '{configs_str}' \\\n"
+        script = f'{prefix}python src/main.py --configs "{configs_str}" \\\n'
         script += f"{prefix}\t{cmd}\n\n"
 
     return script
@@ -288,8 +288,9 @@ def make_run_script_sweep_manual_job(
 ) -> Path:
     script = "#!/bin/bash\n\n\n"
     script += "\nexport WANDB_JOB_TYPE=hp_exp\n"
-    script += "export WANDB_RUN_ID=$RUN_ID\n"
-    script += f"export WANDB_TAGS=launched_by_{exp_key}\n\n\n"
+    script += "export WANDB_RUN_ID=$RUN_ID\n\n\n"
+    script += f"CONFIGSTR='{configs}'\n\n"
+    configs_str = "$CONFIGSTR"
 
     script += LOAD_GPU_COUNTS_TO_VAR
 
@@ -298,7 +299,6 @@ def make_run_script_sweep_manual_job(
     script += "\tsource scripts/set_master_ip_and_addr.sh\n"
     args_cp = copy.deepcopy(args)
     args_cp.use_torch_distributed = True
-    configs_str = configs
     for c in commands.split(","):
         script += command_to_bash_str(c, configs_str, prefix="\t", args=args_cp)
 
@@ -306,7 +306,6 @@ def make_run_script_sweep_manual_job(
 
     args_cp = copy.deepcopy(args)
     args_cp.use_torch_distributed = False
-    configs_str = configs
     for c in commands.split(","):
         script += command_to_bash_str(c, configs_str, prefix="\t", args=args_cp)
 
@@ -358,10 +357,17 @@ def make_run_script_sweep_manual_agent(
     script += f"export SWEEP_CONFIGS='{sweep_configs}'\n"
     script += f"export CAPTURE_LOG=1\n"
     script += f"export SWEEP_ROOT_DIR=experiments/$SWEEP_NAME\n"
+    script += f"export HP_EXP_CONFIG='{configs}'\n"
     script += f"mkdir -p $SWEEP_ROOT_DIR\n"
 
     script += f"\nexport WANDB_RUN_GROUP={args.group}\n"
-    script += f"export WANDB_TAGS=sweep,manual_sweep,launched_by_{exp_key}\n"
+
+    tags = args.tags
+    if tags is None:
+        tags = ""
+    else:
+        tags = f",{tags}"
+    script += f"export WANDB_TAGS=sweep,manual_sweep,launched_by_{exp_key}{tags}\n"
 
     script += f"\nchmod a+x scripts/manual_sweep_agent.sh\n"
     script += f"./scripts/manual_sweep_agent.sh\n\n"
@@ -478,6 +484,11 @@ def main(args: argparse.Namespace):
     else:
         args.group = group
 
+    if args.tags is not None:
+        tags = args.tags.split(",")
+    else:
+        tags = None
+
     dir_dir = Path(tempfile.gettempdir()) / next(tempfile._get_candidate_names())
     dir_dir.mkdir(parents=True, exist_ok=True)
     settings = wandb.Settings()
@@ -502,6 +513,7 @@ def main(args: argparse.Namespace):
         job_type=job_type,
         id=args.idx,
         resume="allow",
+        tags=tags,
     )
 
     run_id = run.id
@@ -659,6 +671,13 @@ if __name__ == "__main__":
         metavar="KEY=VAL[,KEY=VAL]",
         type=str,
         help="Experiment environment variables",
+    )
+
+    parser.add_argument(
+        "--tags",
+        metavar="VAL[,VAL]",
+        type=str,
+        help="Experiment tags",
     )
 
     parser.add_argument(

@@ -76,14 +76,19 @@ for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
 
 done
 
-python scripts/manual_sweep.py \
-  --sweep_name $SWEEP_NAME \
-  --sweep_root_dir $SWEEP_ROOT_DIR \
-  --sweep_configs $SWEEP_CONFIGS \
-  fail_if_sweep_not_complete
+# Check if the SWEEP_CONFIGS was not equal to 'configs/sweeps/no_sweep.jsonnet
+# If it was, then we don't need to run the sweep completion script
+if [ "$SWEEP_CONFIGS" != "configs/sweeps/no_sweep.jsonnet" ]; then
+  python scripts/manual_sweep.py \
+    --sweep_name $SWEEP_NAME \
+    --sweep_root_dir $SWEEP_ROOT_DIR \
+    --sweep_configs $SWEEP_CONFIGS \
+    fail_if_sweep_not_complete
 
-python scripts/manual_sweep.py \
-  --sweep_name $SWEEP_NAME \
-  --sweep_root_dir $SWEEP_ROOT_DIR \
-  --sweep_configs $SWEEP_CONFIGS \
-  save_best_config
+  python scripts/manual_sweep.py \
+    --sweep_name $SWEEP_NAME \
+    --sweep_root_dir $SWEEP_ROOT_DIR \
+    --sweep_configs $SWEEP_CONFIGS \
+    save_best_config
+
+fi
