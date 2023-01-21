@@ -86,6 +86,7 @@ class SlurmComputingCluster(ComputingCluster):
         transformers_offline: bool = False,
         hf_datasets_offline: bool = False,
         account: str = None,
+        dry_run: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -128,6 +129,8 @@ class SlurmComputingCluster(ComputingCluster):
             self.cluster_shared_storage_dir / self.project_name / "experiments"
         )
         self.experiments_dir.mkdir(parents=True, exist_ok=True)
+
+        self.dry_run = dry_run
 
     def prepare_job(self, output_dir: Path) -> str:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -187,7 +190,15 @@ class SlurmComputingCluster(ComputingCluster):
         return persistent_key
 
     def execute_job(self, job_body):
-        login_script_path = self.create_launch_script(job_body)
+        login_script_path, compute_script_path = self.create_launch_script(job_body)
+
+        if self.dry_run:
+            print("---------------------------")
+            print("Dry run, not submitting job")
+            print("---------------------------")
+            print(f"Script to run on login node:\t{login_script_path}")
+            print(f"Script to run on compute node:\t{compute_script_path}")
+            return
 
         if self.interactive:
             try:
@@ -212,7 +223,7 @@ class SlurmComputingCluster(ComputingCluster):
             if self.wait_for_login_script:
                 p.wait()
 
-    def create_launch_script(self, job_body) -> Path:
+    def create_launch_script(self, job_body) -> Tuple[Path, Path]:
         tmp_exp_dir = (
             self.cluster_shared_storage_dir
             / "job_launcher_files"
@@ -221,6 +232,7 @@ class SlurmComputingCluster(ComputingCluster):
         tmp_exp_dir.mkdir(parents=True, exist_ok=True)
 
         persistent_key = self.prepare_job(tmp_exp_dir / "home")
+
         compute_script = self.create_compute_script(tmp_exp_dir, persistent_key)
         compute_script_path = self.script_dir / f"{self.launcher_id}_compute.sh"
         save_and_make_executable(compute_script_path, compute_script)
@@ -239,7 +251,7 @@ class SlurmComputingCluster(ComputingCluster):
         login_script_path = self.script_dir / f"{self.launcher_id}_login.sh"
         save_and_make_executable(login_script_path, login_script)
 
-        return login_script_path
+        return login_script_path, compute_script_path
 
     def _create_pre_sbatch_launch_script(
         self, tmp_exp_dir: Path, persistent_key: str
@@ -360,9 +372,10 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         wandb_offline = kwargs.pop("wandb_offline", True)
         transformers_offline = kwargs.pop("transformers_offline", True)
         hf_datasets_offline = kwargs.pop("hf_datasets_offline", True)
+        shared_storage_dir = kwargs.pop("shared_storage_dir", "~/scratch")
         super().__init__(
             **kwargs,
-            shared_storage_dir="~/scratch",
+            shared_storage_dir=shared_storage_dir,
             account=account,
             wandb_offline=wandb_offline,
             transformers_offline=transformers_offline,
@@ -488,9 +501,10 @@ class MilaCluster(SlurmComputingCluster):
         wandb_offline = kwargs.pop("wandb_offline", False)
         transformers_offline = kwargs.pop("transformers_offline", False)
         hf_datasets_offline = kwargs.pop("hf_datasets_offline", False)
+        shared_storage_dir = kwargs.pop("shared_storage_dir", "~/scratch")
         super().__init__(
             **kwargs,
-            shared_storage_dir="~/scratch",
+            shared_storage_dir=shared_storage_dir,
             wandb_offline=wandb_offline,
             transformers_offline=transformers_offline,
             hf_datasets_offline=hf_datasets_offline,
