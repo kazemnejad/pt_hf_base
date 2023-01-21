@@ -1,22 +1,28 @@
 #!/bin/bash
 
-# Make sure best_run.json exists
-if [ ! -f best_run.json ]; then
-  echo "best_run.json does not exist. Run 'scripts/manual_sweep.py save_best_config' first."
-  exit 1
-fi
-
-CONFIGS_STR="best_run.json,configs/hp_base.jsonnet,configs/final.jsonnet"
-
-SEEDS="256788 234054 146317"
-
 set -e
 
-python scripts/manual_sweep.py \
-  --sweep_name $SWEEP_NAME \
-  --sweep_root_dir $SWEEP_ROOT_DIR \
-  --sweep_configs $SWEEP_CONFIGS \
-  fail_if_sweep_not_complete
+if [ ! -f best_run.json ]; then
+  # If best_run.json does not exist, then it means there were no sweeps
+  # So, we just run the base config
+  echo "best_run.json does not exist. Running base config."
+  # Make sure HP_EXP_CONFIG is set
+  if [ -z "$HP_EXP_CONFIG" ]; then
+    echo "HP_EXP_CONFIG is not set"
+    exit 1
+  fi
+  CONFIGS_STR="${HP_EXP_CONFIG},configs/hp_base.jsonnet,configs/final.jsonnet"
+else
+  CONFIGS_STR="best_run.json,configs/hp_base.jsonnet,configs/final.jsonnet"
+
+  python scripts/manual_sweep.py \
+    --sweep_name $SWEEP_NAME \
+    --sweep_root_dir $SWEEP_ROOT_DIR \
+    --sweep_configs $SWEEP_CONFIGS \
+    fail_if_sweep_not_complete
+fi
+
+SEEDS="256788 234054 146317"
 
 RUN_ID_PREFIX=$(python scripts/manual_sweep.py \
   --sweep_name $SWEEP_NAME \
