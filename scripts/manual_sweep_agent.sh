@@ -76,7 +76,7 @@ for CONFIG_FILE in $SWEEP_ROOT_DIR/hyperparameters/*.json; do
   fi
 
 done
-shopt -s nullglob
+shopt -u nullglob
 
 # Check if the SWEEP_CONFIGS was not equal to 'configs/sweeps/no_sweep.jsonnet
 # If it was, then we don't need to run the sweep completion script
