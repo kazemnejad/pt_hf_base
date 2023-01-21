@@ -551,7 +551,7 @@ def get_config(required_keys: List[str]) -> Dict[str, Union[str, bool]]:
             k: inquirer.text(
                 message=key_to_message.get(k, f"Enter {k}"),
             ).execute()
-            for k in required_keys
+            for k in [key]
         }
         config_ob.update(new_config_ob)
 
