@@ -543,7 +543,8 @@ def launch_job(args: argparse.Namespace) -> None:
         if cluster_kwargs[k] is None:
             del cluster_kwargs[k]
 
-    config_obj = get_config([])
+    required_keys = []
+    config_obj = get_config(required_keys)
 
     clstr_args = copy.deepcopy(cluster_kwargs)
     clstr_args.update({"launcher_id": args.bundle})
