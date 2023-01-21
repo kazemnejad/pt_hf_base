@@ -705,7 +705,7 @@ if __name__ == "__main__":
         "--platform",
         metavar="PLATFORM",
         type=str,
-        choices=["mila", "cc", "aws"],
+        choices=["mila", "cc"],
         default="mila",
         help="The computation platform we're running the experiment",
     )
@@ -766,40 +766,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--env",
+        "--env_vars",
         metavar="ENVS",
         type=str,
         help="Environment variables passed to the container, e.g. X1=V1,x2=V2",
-    )
-
-    parser.add_argument(
-        "--max_number_tasks",
-        metavar="NUM_TASKS",
-        type=int,
-        default=-1,
-        help="Maximum number of tasks to submit. Set -1 to ignore",
-    )
-
-    parser.add_argument(
-        "--delay_between_submissions",
-        metavar="SECONDS",
-        type=int,
-        default=5,
-        help="The delay between job submissions",
-    )
-
-    parser.add_argument(
-        "--exit_if_no_jobs",
-        action="store_true",
-        default=False,
-        help="Exit if no jobs are found in the queue.",
-    )
-
-    parser.add_argument(
-        "--skip_aws_configure",
-        action="store_true",
-        default=False,
-        help="Skip AWS configure (useful if reading from env variables)",
     )
 
     parser.add_argument(
