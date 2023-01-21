@@ -734,14 +734,14 @@ if __name__ == "__main__":
         "--shared_storage_dir",
         metavar="DIR",
         type=str,
-        help="Path to platform's long-term storage",
+        help="Path to cluster's shared storage between compute nodes and login node",
     )
 
     parser.add_argument(
         "--compute_storage_dir",
         metavar="DIR",
         type=str,
-        help="Platform's node storage (short-term)",
+        help="Path to on-device storage on compute nodes",
     )
 
     parser.add_argument(
@@ -775,7 +775,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nodup",
         action="store_true",
-        help="Do not run already queued the experiment",
+        help="Do not run already queued experiments",
         default=False,
     )
 
