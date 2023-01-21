@@ -181,6 +181,8 @@ class Seq2SeqRuntime(Runtime):
 
         self.global_vars = global_vars or {"seed": 123}
         self.debug_mode = self.global_vars.get("debug_mode", False)
+        self.dataset_debug_mode = self.global_vars.get("dataset_debug_mode", self.debug_mode)
+
         self.force_offline = self.global_vars.get("force_offline", False)
         self.config_dict = config_dict
 
@@ -193,12 +195,15 @@ class Seq2SeqRuntime(Runtime):
         if self.debug_mode:
             logger.info(">>>>>>>>>>>>>>>>> DEBUG MODE <<<<<<<<<<<<<<<<<<<")
 
+        if self.dataset_debug_mode:
+            logger.info(">>>>>>>>>>>>>>>>> DATASET DEBUG MODE <<<<<<<<<<<<<<<<<<<")
+
         if is_world_process_zero():
             assert self.logger is not None
 
         self.dl_factory = self.lazy_dataset.construct(
             log_dir=self.logs_dir,
-            debug_mode=self.debug_mode,
+            debug_mode=self.dataset_debug_mode,
             seed=seed,
         )
         self.write_meta_data()
