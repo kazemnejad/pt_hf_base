@@ -571,7 +571,7 @@ def launch_job(args: argparse.Namespace) -> None:
     config = get_config(required_keys)
 
     clstr_args = copy.deepcopy(cluster_kwargs)
-    clstr_args.update({"launcher_id": args.bundle, config: config})
+    clstr_args.update({"launcher_id": args.bundle, "config": config})
     if "project_name" not in clstr_args:
         clstr_args["project_name"] = os.environ.get("WANDB_PROJECT", "pt_hf_base")
 
