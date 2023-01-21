@@ -535,16 +535,18 @@ def get_config(required_keys: List[str]) -> Dict[str, Union[str, bool]]:
     else:
         config_ob = {}
 
-    try:
-        assert all(f in config_ob for f in required_keys)
-    except:
+    key_to_message = {
+        "wandb_api_key": "Enter your wandb api key",
+        "conda_env_name": "Enter the name of the conda environment",
+        "wandb_project_name": "Enter the name of the wandb project",
+    }
+
+    for key in required_keys:
+        if key in config_ob:
+            continue
+
         from InquirerPy import inquirer
 
-        key_to_message = {
-            "wandb_api_key": "Enter your wandb api key",
-            "conda_env_name": "Enter the name of the conda environment",
-            "wandb_project_name": "Enter the name of the wandb project",
-        }
         new_config_ob = {
             k: inquirer.text(
                 message=key_to_message.get(k, f"Enter {k}"),
@@ -553,12 +555,8 @@ def get_config(required_keys: List[str]) -> Dict[str, Union[str, bool]]:
         }
         config_ob.update(new_config_ob)
 
-        with config_path.open("w") as f:
-            json.dump(
-                config_ob,
-                f,
-                indent=4,
-            )
+    with config_path.open("w") as f:
+        json.dump(config_ob, f, indent=4)
 
     return config_ob
 
