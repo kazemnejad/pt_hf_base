@@ -88,6 +88,7 @@ class SlurmComputingCluster(ComputingCluster):
         account: str = None,
         config: Dict[str, str] = None,
         env_vars: List[str] = None,
+        dry_run: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -135,6 +136,8 @@ class SlurmComputingCluster(ComputingCluster):
         self.wandb_api_key = config.get("wandb_api_key", None)
         self.wandb_project_name = config.get("wandb_project_name", None)
         self.wandb_entity_name = config.get("wandb_entity_name", None)
+
+        self.dry_run = dry_run
 
     def prepare_job(self, output_dir: Path) -> str:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +207,13 @@ class SlurmComputingCluster(ComputingCluster):
         return persistent_key
 
     def execute_job(self, job_body):
-        login_script_path = self.create_launch_script(job_body)
+        login_script_path, compute_script_path = self.create_launch_script(job_body)
+
+        if self.dry_run:
+            print("Dry run, not executing job")
+            print(f"Login script: {login_script_path}")
+            print(f"Compute script: {compute_script_path}")
+            return
 
         if self.interactive:
             try:
@@ -229,7 +238,7 @@ class SlurmComputingCluster(ComputingCluster):
             if self.wait_for_login_script:
                 p.wait()
 
-    def create_launch_script(self, job_body) -> Path:
+    def create_launch_script(self, job_body) -> Tuple[Path, Path]:
         tmp_exp_dir = (
             self.cluster_shared_storage_dir
             / "job_launcher_files"
@@ -238,6 +247,7 @@ class SlurmComputingCluster(ComputingCluster):
         tmp_exp_dir.mkdir(parents=True, exist_ok=True)
 
         persistent_key = self.prepare_job(tmp_exp_dir / "home")
+
         compute_script = self.create_compute_script(tmp_exp_dir, persistent_key)
         compute_script_path = self.script_dir / f"{self.launcher_id}_compute.sh"
         save_and_make_executable(compute_script_path, compute_script)
@@ -256,7 +266,7 @@ class SlurmComputingCluster(ComputingCluster):
         login_script_path = self.script_dir / f"{self.launcher_id}_login.sh"
         save_and_make_executable(login_script_path, login_script)
 
-        return login_script_path
+        return login_script_path, compute_script_path
 
     def _create_pre_sbatch_launch_script(
         self, tmp_exp_dir: Path, persistent_key: str
@@ -779,13 +789,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--dry_run",
-        action="store_true",
-        default=False,
-        help="Don't remove the launched jobs from the queue (Useful for testing and debugging).",
-    )
-
-    parser.add_argument(
         "--exit_if_no_jobs",
         action="store_true",
         default=False,
@@ -817,6 +820,13 @@ if __name__ == "__main__":
         "--interactive",
         action="store_true",
         help="Run the job interactively",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--dry_run",
+        action="store_true",
+        help="Don't execute the jobs (Useful for testing and debugging).",
         default=False,
     )
 
