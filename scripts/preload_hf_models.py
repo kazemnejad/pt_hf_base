@@ -19,8 +19,11 @@ for model_name in model_names:
     t = AutoTokenizer.from_pretrained(model_name)
     del t
 for model_name in model_names:
-    m = AutoModel.from_pretrained(model_name)
-    del m
+    try:
+        m = AutoModel.from_pretrained(model_name)
+        del m
+    except Exception as e:
+        pass
 
 _ = load_metric("glue", "rte")
 _ = load_metric("accuracy")

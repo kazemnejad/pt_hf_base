@@ -1015,7 +1015,8 @@ class Seq2SeqRuntime(Runtime):
                     {f"analyze_all_{split}_ckpt_path": f"last at {last_ckpt_path}"}
                 )
 
-        for config_obj in self.analyzers:
+        analyzers = copy.deepcopy(self.analyzers)
+        for config_obj in analyzers:
             analyzer = Analyzer.from_params(
                 Params(config_obj),
                 model=trainer.model,
