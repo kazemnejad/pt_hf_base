@@ -476,13 +476,13 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         # script += "\tmv ~/.wandb_cache_dir ~/.wandb_cache_dir.back\n"
         # script += "fi\n\n"
 
-        # script += 'if [[ -e "~/experiments" ]] ; then\n'
-        # script += "\tmoved_experiment=1\n"
-        # script += "\tmv ~/experiments ~/experiments.back\n"
-        # script += "fi\n\n"
+        script += 'if [[ -e "~/experiments" ]] ; then\n'
+        script += "\tmoved_experiment=1\n"
+        script += "\tmv ~/experiments ~/experiments.back\n"
+        script += "fi\n\n"
 
         # script += f"ln -sfn {self.experiments_dir}/wandb_cache_dir ~/.wandb_cache_dir\n"
-        # script += f"ln -sfn {self.experiments_dir} ~/experiments\n"
+        script += f"ln -sfn {self.experiments_dir} ~/experiments\n"
         script += f"export WANDB_CACHE_DIR={self.experiments_dir}/wandb_cache_dir\n"
         script += (
             f"find {self.experiments_dir}/{persistent_key}/wandb/ "
