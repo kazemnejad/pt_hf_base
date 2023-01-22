@@ -181,7 +181,9 @@ class Seq2SeqRuntime(Runtime):
 
         self.global_vars = global_vars or {"seed": 123}
         self.debug_mode = self.global_vars.get("debug_mode", False)
-        self.dataset_debug_mode = self.global_vars.get("dataset_debug_mode", self.debug_mode)
+        self.dataset_debug_mode = self.global_vars.get(
+            "dataset_debug_mode", self.debug_mode
+        )
 
         self.force_offline = self.global_vars.get("force_offline", False)
         self.config_dict = config_dict
@@ -925,6 +927,22 @@ class Seq2SeqRuntime(Runtime):
         self.predict(eval_split, load_best=load_best, enable_metrics=True)
         self.combine_pred(eval_split)
         self.analyze_all(load_best=load_best, split=eval_split)
+
+    def full_step(
+        self,
+        eval_split: str = "valid",
+        test_split: str = "test",
+        load_best: bool = True,
+    ):
+        self.train(eval_split)
+
+        self.predict(test_split)
+        self.combine_pred(test_split)
+        self.analyze_all(split=test_split)
+
+        self.predict(eval_split)
+        self.combine_pred(eval_split)
+        self.analyze_all(split=eval_split)
 
     def analyze(self, config_filenames: str, load_best: bool = True):
         if not is_world_process_zero():
