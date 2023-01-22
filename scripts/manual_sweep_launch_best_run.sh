@@ -38,24 +38,6 @@ for SEED in $SEEDS; do
   export WANDB_RUN_ID="${RUN_ID_PREFIX}__${SEED}"
 
   python src/main.py --configs $CONFIGS_STR \
-    train --eval_split valid
-
-  python src/main.py --configs $CONFIGS_STR \
-    predict
-
-  python src/main.py --configs $CONFIGS_STR \
-    combine_pred
-
-  python src/main.py --configs $CONFIGS_STR \
-    analyze_all
-
-  python src/main.py --configs $CONFIGS_STR \
-    predict --split valid
-
-  python src/main.py --configs $CONFIGS_STR \
-    combine_pred --split valid
-
-  python src/main.py --configs $CONFIGS_STR \
-    analyze_all --split valid
+    full_step
 
 done
