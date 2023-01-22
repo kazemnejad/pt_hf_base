@@ -546,9 +546,9 @@ class Seq2SeqRuntime(Runtime):
         return best_model_checkpoint
 
     def train(self, eval_split: str = "valid", train_split: str = "train"):
-        logger.info(f"*" * 100)
+        logger.info("\n" * 5 + "*" * 100)
         logger.info(f"* Training on {train_split} and evaluating on {eval_split}")
-        logger.info(f"*" * 100)
+        logger.info("*" * 100 + "\n" * 5)
         torch.cuda.empty_cache()
 
         model = self.create_model()
@@ -705,9 +705,9 @@ class Seq2SeqRuntime(Runtime):
     def predict(
         self, split: str = "test", enable_metrics: bool = False, load_best: bool = True
     ):
-        logger.info(f"*" * 100)
+        logger.info("\n" * 5 + "*" * 100)
         logger.info(f"* Predict on {split} *")
-        logger.info(f"*" * 100)
+        logger.info("*" * 100 + "\n" * 5)
         torch.cuda.empty_cache()
         if "load_best_model_at_end" in self.training_args:
             self.training_args.pop("load_best_model_at_end")
@@ -854,9 +854,9 @@ class Seq2SeqRuntime(Runtime):
         if not is_world_process_zero():
             return
 
-        logger.info(f"*" * 100)
+        logger.info("\n" * 5 + "*" * 100)
         logger.info(f"* Combining predictions for split = {split}")
-        logger.info(f"*" * 100)
+        logger.info("*" * 100 + "\n" * 5)
 
         prediction_path = self.exp_root / f"pred_out_{split}.jsonl"
         logger.info(f"Prediction path: {prediction_path}")
@@ -1011,9 +1011,9 @@ class Seq2SeqRuntime(Runtime):
             logger.warning("self.analyzers is None. Exiting...")
             return
 
-        logger.info(f"*" * 100)
+        logger.info("\n" * 5 + "*" * 100)
         logger.info(f"* Running all analyzers on {split}...")
-        logger.info(f"*" * 100)
+        logger.info("*" * 100 + "\n" * 5)
 
         torch.cuda.empty_cache()
         if "load_best_model_at_end" in self.training_args:
