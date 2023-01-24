@@ -799,7 +799,7 @@ class Seq2SeqRuntime(Runtime):
 
                     logger.info(
                         f"Eval Batch size is too large. Reducing it to "
-                        f"{self.training_args['per_device_train_batch_size']} "
+                        f"{self.training_args['per_device_eval_batch_size']} "
                     )
 
                     # Empty the cache
@@ -818,7 +818,7 @@ class Seq2SeqRuntime(Runtime):
 
             if trainer.is_world_process_zero():
                 self.logger.summary[
-                    "auto_computed_batch_size_eval"
+                    "auto_computed_batch_size_predict"
                 ] = self.training_args["per_device_eval_batch_size"]
 
             self.training_args = orig_training_args
