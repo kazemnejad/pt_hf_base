@@ -604,21 +604,43 @@ class Seq2SeqRuntime(Runtime):
                     if "out of memory" not in str(e):
                         raise e
 
-                    # Divide the batch_size in half and increase the accumulation steps
-                    curr_batch_size = self.training_args["per_device_train_batch_size"]
-                    self.training_args["per_device_train_batch_size"] = (
-                        curr_batch_size // 2
-                    )
-                    self.training_args["gradient_accumulation_steps"] = (
-                        self.training_args.get("gradient_accumulation_steps", 1) * 2
-                    )
+                    try:
+                        is_oom_from_eval = trainer.control.should_evaluate
+                    except:
+                        is_oom_from_eval = False
 
-                    logger.info(
-                        f"Batch size is too large. Reducing it to "
-                        f"{self.training_args['per_device_train_batch_size']} "
-                        f"and increasing gradient accumulation steps to "
-                        f"{self.training_args['gradient_accumulation_steps']}"
-                    )
+                    if is_oom_from_eval:
+                        logger.warning("OOM during evaluation.")
+
+                        curr_batch_size = self.training_args[
+                            "per_device_eval_batch_size"
+                        ]
+                        self.training_args["per_device_eval_batch_size"] = (
+                            curr_batch_size // 2
+                        )
+
+                        logger.info(
+                            f"Eval Batch size is too large. Reducing it to "
+                            f"{self.training_args['per_device_eval_batch_size']} "
+                        )
+                    else:
+                        # Divide the batch_size in half and increase the accumulation steps
+                        curr_batch_size = self.training_args[
+                            "per_device_train_batch_size"
+                        ]
+                        self.training_args["per_device_train_batch_size"] = (
+                            curr_batch_size // 2
+                        )
+                        self.training_args["gradient_accumulation_steps"] = (
+                            self.training_args.get("gradient_accumulation_steps", 1) * 2
+                        )
+
+                        logger.info(
+                            f"Batch size is too large. Reducing it to "
+                            f"{self.training_args['per_device_train_batch_size']} "
+                            f"and increasing gradient accumulation steps to "
+                            f"{self.training_args['gradient_accumulation_steps']}"
+                        )
 
                     # Empty the cache
                     torch.cuda.empty_cache()
@@ -644,6 +666,9 @@ class Seq2SeqRuntime(Runtime):
                 self.logger.summary["auto_computed_batch_size"] = self.training_args[
                     "per_device_train_batch_size"
                 ]
+                self.logger.summary[
+                    "auto_computed_eval_batch_size"
+                ] = self.training_args["per_device_eval_batch_size"]
                 self.logger.summary[
                     "auto_computed_grad_acc_steps"
                 ] = self.training_args.get("gradient_accumulation_steps", 1)
