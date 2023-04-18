@@ -287,6 +287,14 @@ class SlurmComputingCluster(ComputingCluster):
         script += f"rsync -avz $HOME/.netrc {tmp_exp_dir}/home/\n"
         script += f"rsync -avz $HOME/.ssh {tmp_exp_dir}/home/\n"
 
+        # Check if the job has `pre_submit_script.sh`
+        pre_submit_script_path = tmp_exp_dir / "home" / "pre_submit_script.sh"
+        if pre_submit_script_path.exists():
+            script += f'echo "Running pre_submit_script.sh..."\n'
+            script += f"echo '{pre_submit_script_path}'\n"
+            script += f"chmod a+x {pre_submit_script_path}\n"
+            script += f"(cd {tmp_exp_dir}/home && ./{pre_submit_script_path.name})\n"
+
         return script
 
     def _create_sbatch_launch_script(
