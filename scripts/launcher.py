@@ -8,9 +8,12 @@ import os
 import shlex
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 from shutil import which
 from typing import Dict, Union, Any, List, Tuple
+
+import requests
 
 
 def create_md5_hash(inp: str):
@@ -89,6 +92,7 @@ class SlurmComputingCluster(ComputingCluster):
         config: Dict[str, str] = None,
         env_vars: List[str] = None,
         dry_run: bool = False,
+        singularity_module: str = "singularity",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -138,6 +142,8 @@ class SlurmComputingCluster(ComputingCluster):
         self.wandb_entity_name = config.get("wandb_entity_name", None)
 
         self.dry_run = dry_run
+
+        self.singularity_module = singularity_module
 
     def prepare_job(self, output_dir: Path) -> str:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -369,7 +375,7 @@ class SlurmComputingCluster(ComputingCluster):
 
         script += f'\necho "Running the computation..." \n'
         script += "cd $HOME\n"
-        script += 'command -v "module" >/dev/null && module load singularity\n'
+        script += f'command -v "module" >/dev/null && module load {self.singularity_module}\n'
 
         if not self.interactive:
             script += "singularity exec --nv \\\n"
@@ -406,6 +412,7 @@ class ComputeCanadaCluster(SlurmComputingCluster):
             wandb_offline=wandb_offline,
             transformers_offline=transformers_offline,
             hf_datasets_offline=hf_datasets_offline,
+            singularity_module="apptainer"
         )
 
     def prepare_job(self, output_dir: Path) -> str:
@@ -470,6 +477,27 @@ class ComputeCanadaCluster(SlurmComputingCluster):
         save_and_make_executable(output_dir / self.run_script_name, worker_script)
 
         return persistent_key
+
+    def _create_pre_sbatch_launch_script(
+        self, tmp_exp_dir: Path, persistent_key: str
+    ) -> str:
+        script = "#!/bin/bash \n\n"
+
+        job_persistent_dir = f"{self.experiments_dir}/{persistent_key}/"
+        script += f"mkdir -p {job_persistent_dir}\n"
+        script += f"ln -sfn {job_persistent_dir} {self.log_dir}/exp_dir\n"
+        script += f"ln -sfn {job_persistent_dir} {self.experiments_dir}/lid_{self.launcher_id}\n"
+        script += "sleep 5\n\n"
+
+        # Check if the job has `pre_submit_script.sh`
+        pre_submit_script_path = tmp_exp_dir / "home" / "pre_submit_script.sh"
+        if pre_submit_script_path.exists():
+            script += f'echo "Running pre_submit_script.sh..."\n'
+            script += f"echo '{pre_submit_script_path}'\n"
+            script += f"chmod a+x {pre_submit_script_path}\n"
+            script += f"(cd {tmp_exp_dir}/home && ./{pre_submit_script_path.name})\n"
+
+        return script
 
     def _create_post_sbatch_launch_script(
         self, tmp_exp_dir: Path, persistent_key: str
